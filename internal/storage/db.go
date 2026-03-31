@@ -144,4 +144,14 @@ var migrations = []string{
 		full_html    TEXT,
 		created_at   DATETIME DEFAULT CURRENT_TIMESTAMP
 	)`,
+
+	// Indexes for common query patterns.
+	`CREATE INDEX IF NOT EXISTS idx_workouts_started_at ON workouts(started_at)`,
+	`CREATE INDEX IF NOT EXISTS idx_workouts_processed  ON workouts(processed)`,
+	`CREATE INDEX IF NOT EXISTS idx_notes_timestamp     ON athlete_notes(timestamp)`,
+	`CREATE INDEX IF NOT EXISTS idx_notes_workout_id    ON athlete_notes(workout_id)`,
+	`CREATE INDEX IF NOT EXISTS idx_reports_week_start  ON reports(week_start)`,
+
+	// Unique constraint on reports(type, week_start) required for ON CONFLICT upserts.
+	`CREATE UNIQUE INDEX IF NOT EXISTS idx_reports_type_week ON reports(type, week_start)`,
 }
