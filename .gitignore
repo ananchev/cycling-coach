@@ -1,0 +1,21 @@
+# Binaries
+cycling-coach
+*.exe
+
+# Environment
+.env
+
+# Data (persisted in Docker volume, not in repo)
+data/
+*.db
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Go
+vendor/

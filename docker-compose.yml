@@ -1,0 +1,14 @@
+services:
+  cycling-coach:
+    build: .
+    container_name: cycling-coach
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    volumes:
+      - coach-data:/data
+    env_file:
+      - .env
+
+volumes:
+  coach-data:
