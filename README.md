@@ -287,14 +287,6 @@ Migrations are defined in [`internal/storage/db.go`](/Users/ananchev/Development
 
 Report HTML is currently rendered by inline Go code in [`internal/reporting/renderer.go`](/Users/ananchev/Development/cycling-coach/internal/reporting/renderer.go) and stored in the database.
 
-The repo also still contains:
-
-- [`templates/report.html`](/Users/ananchev/Development/cycling-coach/templates/report.html)
-- [`templates/plan.html`](/Users/ananchev/Development/cycling-coach/templates/plan.html)
-- [`static/style.css`](/Users/ananchev/Development/cycling-coach/static/style.css)
-
-These files are packaged into the image but are not the active rendering path used by the current implementation.
-
 ## Development
 
 ```bash

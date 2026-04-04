@@ -73,12 +73,12 @@
 
 ## Athlete
 
-- **Goal:** Build aerobic durability, improve threshold climbing power, manage weight for Stelvio climb (May 2026)
-- **FTP:** 251 W *(no recent test; likely slightly underestimating current fitness but kept for consistency)*
-- **Weight:** ~90–91 kg
-- **W/kg:** ~2.75–2.80
-- **HRmax:** 184 bpm
-- **Preferred cadence:** Indoor 68–75 rpm (best HR stability) · Outdoor ~85 rpm
+- **Goal:** Build aerobic durability, improve threshold climbing power, and support sustainable body-composition progress for a mountainous gran fondo later in the season
+- **FTP:** 250 W *(illustrative baseline for the default profile)*
+- **Weight:** ~78 kg
+- **W/kg:** ~3.2
+- **HRmax:** 185 bpm
+- **Preferred cadence:** Indoor 70-80 rpm · Outdoor 80-90 rpm
 
 ---
 
@@ -133,13 +133,13 @@ Weekly TSS benchmarks for this athlete: 300–450 is a normal training week. Abo
 ### Physiological traits
 - **Diesel-type athlete:** strong steady-state, poor sprint. Needs gradual load progression — interval jumps cause failure.
 - **HR is sensitive to:** hydration, stress, sleep, illness recovery. HR drift is the primary quality signal, not average power.
-- **Low cadence improves efficiency:** 68–72 rpm gives best HR/power coupling indoors. Higher cadence raises HR disproportionately.
+- **Cadence preference varies by context:** a moderately lower cadence may feel steadier indoors, while outdoor riding may trend higher.
 
 ### Training constraints
 - Weekday sessions: ≤ 60 minutes
 - Preferred rest day: Friday
 - Long endurance on weekends (90–120 min)
-- Mostly indoor (Wahoo KICKR)
+- Mostly indoor trainer riding
 - Frequent travel blocks interrupt consistency — always factor this in when assessing compliance
 
 ---
@@ -180,19 +180,19 @@ Weekly TSS benchmarks for this athlete: 300–450 is a normal training week. Abo
 <!-- Safe to edit freely — updated by Evolve Profile -->
 
 ### Recovery and base build (Jan–Feb 2026)
-- January: post-illness recovery, reduced Z2 ceiling (~125–130 W), unstable HR
-- February: progressive rebuild → full recovery achieved by end of month
-- Z2 power progression: ~130 W → ~135 W → ~140 W (stable by late Feb)
-- Aerobic coupling (efficiency factor) improved significantly in late Feb
+- Early season: rebuilding consistency after reduced training, with conservative endurance intensity and variable heart-rate response
+- Mid base phase: progressive rebuild with steadier aerobic coupling and better repeatability
+- Endurance power trended upward gradually as durability improved
+- Aerobic efficiency improved as volume tolerance returned
 
 ### Current phase (Mar–Apr 2026)
-- Aerobic base solid; Z2 stable at 135–140 W
-- Tempo reintroduced successfully (1–2 sessions/week at 150–155 W)
-- Occasional HR drift spikes (10–13%) are situational (hydration/travel/stress), not physiological regression
-- Entering structured build: stabilise 140 W Z2 → extend tempo blocks → approach Sweet Spot
+- Aerobic base is established and steady endurance work is repeatable
+- Tempo work has been reintroduced successfully in limited weekly doses
+- Occasional HR drift spikes are often situational (hydration, travel, stress), not automatic evidence of regression
+- Current focus: stabilise endurance power, extend tempo blocks, then approach Sweet Spot progressively
 
 ### Next steps
-- Stabilise 140 W as default Z2 power
+- Stabilise current Z2 power as the default endurance anchor
 - Extend tempo blocks progressively (2×10 min → 2×12 min → 2×15 min)
 - Introduce Sweet Spot short intervals after 2 consecutive weeks of drift <5%
 
@@ -205,7 +205,7 @@ Weekly TSS benchmarks for this athlete: 300–450 is a normal training week. Abo
 - **HR drift >8%:** flag and explain likely cause (hydration, fatigue, heat, travel) — do not treat as regression without context
 - **HR high at low power:** early illness or overreaching signal — recommend load reduction
 - **Threshold failures:** usually progression error, not fitness loss — step back one level
-- **Weight elevated (>92 kg):** note the trend; managed via training consistency not restriction
+- **Weight trend moving unfavorably for several weeks:** note the trend; manage it through consistency and recovery, not restriction
 
 ---
 
@@ -234,6 +234,6 @@ When generating a **weekly plan:**
 
 **2026-04-02**
 
-- Aerobic base strong; Z2 stabilised around 135–140 W
+- Aerobic base strong; Z2 power has stabilised
 - Entering structured build phase with tempo progressing toward Sweet Spot
-- Stelvio target: May 2026
+- Seasonal endurance event remains the medium-term target

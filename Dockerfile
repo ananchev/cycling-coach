@@ -1,4 +1,4 @@
-FROM golang:1.22-alpine AS builder
+FROM golang:1.24-alpine AS builder
 RUN apk add --no-cache gcc musl-dev
 WORKDIR /app
 COPY go.mod go.sum ./
@@ -10,8 +10,6 @@ FROM alpine:3.19
 RUN apk add --no-cache sqlite-libs ca-certificates tzdata
 WORKDIR /app
 COPY --from=builder /app/cycling-coach .
-COPY --from=builder /app/templates ./templates
-COPY --from=builder /app/static ./static
 COPY --from=builder /app/config ./config
 EXPOSE 8080
 CMD ["./cycling-coach"]

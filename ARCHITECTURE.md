@@ -309,14 +309,6 @@ The admin UI also has a separate display-only formatting path in [`internal/repo
 
 That path is for admin inspection only and does not alter the main Claude prompt assembly.
 
-Inactive-but-present assets:
-
-- [`templates/report.html`](/Users/ananchev/Development/cycling-coach/templates/report.html)
-- [`templates/plan.html`](/Users/ananchev/Development/cycling-coach/templates/plan.html)
-- [`static/style.css`](/Users/ananchev/Development/cycling-coach/static/style.css)
-
-These assets are still copied into the Docker image but are not the active renderer used at runtime.
-
 ## 11. Known Doc Drift Resolved Here
 
 The current codebase does not implement the following older design elements:

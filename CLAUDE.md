@@ -42,8 +42,6 @@ internal/scheduler/  cron wiring
 internal/storage/    SQLite migrations and CRUD helpers
 internal/web/        router, handlers, middleware, admin UI, SSE log stream
 config/              seed athlete profile
-templates/           packaged but not the active report rendering path
-static/              packaged but not the active report rendering path
 testdata/            sample FIT file
 ```
 
@@ -178,8 +176,6 @@ Not implemented despite older docs:
 ## Current Rendering Path
 
 The active report/plan rendering path is [`internal/reporting/renderer.go`](/Users/ananchev/Development/cycling-coach/internal/reporting/renderer.go), which builds HTML from an inline template and stores it in `reports.full_html`.
-
-The files under `templates/` and `static/` are not the active renderer today, even though they are still copied into the Docker image.
 
 Separate from report rendering, the admin UI also exposes modal-only workout views built from [`internal/reporting/ride_view.go`](/Users/ananchev/Development/cycling-coach/internal/reporting/ride_view.go):
 
