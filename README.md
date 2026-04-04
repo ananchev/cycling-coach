@@ -1,178 +1,246 @@
 # cycling-coach
 
-Personal cycling training assistant. Ingests ride data from Wahoo, collects subjective notes via Telegram, analyzes every ride, and generates weekly reports and training plans.
+Personal cycling training assistant. It ingests workouts from Wahoo, stores subjective notes from Telegram, computes ride metrics from FIT files, generates weekly reports and plans with Claude, and can deliver summaries through Telegram.
 
-## How it works
+This file describes the implementation that exists in the repository today. When docs and code differ, the code is the source of truth.
 
-1. **Wahoo KICKR** → ride data flows via webhook/API → FIT files stored and analyzed
-2. **Telegram bot** → you log RPE, weight, sleep/stress notes with zero friction
-3. **Analysis engine** → computes HR drift, power zones, NP, TSS, TRIMP per ride
-4. **Claude API** → generates narrative weekly reports and structured training plans
-5. **Delivery** → compact summaries in Telegram, full reports as web pages
+## Current Runtime Flow
 
-## Quick start
+1. Wahoo OAuth is completed through `/wahoo/authorize` and `/wahoo/callback`.
+2. Workouts arrive through the Wahoo webhook and optional manual/scheduled sync.
+3. Workout rows are stored in SQLite and FIT files are downloaded to disk when available.
+4. FIT processing computes per-ride metrics such as NP, IF, TSS, TRIMP, HR drift, decoupling, zone distribution, and a power-zone timeline.
+5. Weekly reports and plans are assembled from workouts, computed metrics, notes, and the athlete profile markdown.
+6. Claude returns structured JSON with a Telegram-sized summary plus a full narrative.
+7. The app renders HTML, stores it in the database, serves it at `/reports/{id}` or `/plans/{id}`, and can send the summary + link to Telegram.
+
+## Implemented Areas
+
+### Wahoo
+
+- OAuth2 token storage and refresh
+- `POST /wahoo/webhook`
+- Paginated workout sync through the Wahoo API
+- FIT download when the API payload contains a file URL
+- Idempotent workout ingestion keyed by `wahoo_id`
+
+### Analysis
+
+- FIT parsing with `github.com/muktihari/fit`
+- Per-ride metrics stored in `ride_metrics`
+- Reprocessing, FIT reset, and FIT ignore flows through the admin/API layer
+
+### Reporting
+
+- Weekly report generation
+- Weekly plan generation
+- HTML rendering stored in `reports.full_html`
+- Telegram delivery with persisted delivery state and retry support
+- Athlete profile evolution from recent weekly reports
+
+### Telegram
+
+- Inbound commands: `/help`, `/start`, `/ride`, `/note`, `/weight`, `/bodyfat`, `/muscle`, `/profile`, `/profile set`
+- Outbound report delivery through the Bot API
+- Linking ride/note entries to the most recent workout within the last 12 hours
+
+### Admin / HTTP
+
+- Admin UI at `/admin`
+- Health endpoint at `/health`
+- APIs for sync, processing, report generation, report sending, report deletion, note management, body metrics, log streaming, and profile evolution
+- SSE log stream at `/api/logs/stream`
+
+## Current Routes
+
+### Public / integration routes
+
+- `GET /health`
+- `GET /wahoo/authorize`
+- `GET /wahoo/callback`
+- `POST /wahoo/webhook`
+
+### Report pages
+
+- `GET /reports/{id}`
+- `GET /plans/{id}`
+
+### Admin/API routes
+
+- `GET /admin`
+- `POST /api/sync`
+- `POST /api/process`
+- `POST /api/workout/reset-fit`
+- `POST /api/workout/ignore`
+- `POST /api/report`
+- `POST /api/report/send`
+- `DELETE /api/report/{id}`
+- `POST /api/profile/evolve`
+- `GET /api/body-metrics`
+- `GET /api/notes`
+- `PUT /api/notes/{id}`
+- `DELETE /api/notes/{id}`
+- `GET /api/logs/stream`
+
+## Current Telegram Commands
+
+- `/help`
+- `/start`
+- `/ride <text>`
+- `/note <text>`
+- `/weight <kg>`
+- `/bodyfat <pct>`
+- `/muscle <kg>`
+- `/profile`
+- `/profile set` with an attached `.md` file
+
+Commands such as `/status`, `/week`, and `/plan` are mentioned in older design docs but are not implemented in the current codebase.
+
+## Configuration
+
+Copy `.env.example` to `.env` and fill in the required values.
 
 ```bash
 cp .env.example .env
-# Fill in your Wahoo, Telegram, and Anthropic credentials
+```
 
+### Required for Wahoo integration
+
+```env
+WAHOO_CLIENT_ID=
+WAHOO_CLIENT_SECRET=
+WAHOO_REDIRECT_URI=http://localhost:8080/wahoo/callback
+```
+
+For production, set `WAHOO_REDIRECT_URI` to your public callback URL.
+
+### Optional integrations
+
+Telegram is optional. If `TELEGRAM_BOT_TOKEN` or `TELEGRAM_CHAT_ID` is missing, inbound bot handling and report delivery are disabled.
+
+Claude-backed report generation requires `ANTHROPIC_API_KEY`.
+
+### Scheduler
+
+The scheduler exists in code, but jobs are registered only when cron environment variables are set:
+
+```env
+CRON_SYNC=
+CRON_FIT_PROCESSING=
+CRON_WEEKLY_REPORT=
+```
+
+If all three are empty, the scheduler starts with no active jobs.
+
+## Quick Start
+
+```bash
 docker compose up -d
 ```
 
-On first run, the default athlete profile (`config/athlete-profile.default.md`) is copied to the data volume. Update it anytime via Telegram (`/profile set`) or the web API.
+On first startup:
 
-Then visit `https://coach.tonio.cc/wahoo/authorize` to connect your Wahoo account.
+- the SQLite database is created and migrated
+- the FIT files directory is created
+- `config/athlete-profile.default.md` is copied to `ATHLETE_PROFILE_PATH` if no runtime athlete profile exists
+- default athlete config values are seeded into `athlete_config` if keys are missing
 
-## Architecture
+Then open:
 
-See [ARCHITECTURE.md](ARCHITECTURE.md) for the full system design.
-
-## Key files
-
-| File | Purpose |
-|---|---|
-| `CLAUDE.md` | Claude Code dev instructions (read by Claude Code automatically) |
-| `ARCHITECTURE.md` | Full system design, API docs, build phases |
-| `config/athlete-profile.default.md` | Seed athlete profile (training zones, FTP, coaching philosophy) |
-| `.env.example` | Environment variable template |
-
-The athlete profile is runtime config — it lives in the data volume (`/data/athlete-profile.md`), not in the codebase. The seed file provides the initial version.
-
-## Wahoo setup
-
-### 1. Configure credentials
-
-Register a developer app at [developers.wahooligan.com](https://developers.wahooligan.com) and populate `.env`:
-
-```env
-WAHOO_CLIENT_ID=<your client id>
-WAHOO_CLIENT_SECRET=<your client secret>
-WAHOO_REDIRECT_URI=https://coach.tonio.cc/wahoo/callback
-```
-
-For local development, set `WAHOO_REDIRECT_URI=http://localhost:8080/wahoo/callback`.
-
-### 2. Authenticate
-
-Start the server (`make dev`) and open:
-
-```
+```text
 http://localhost:8080/wahoo/authorize
 ```
 
-You will be redirected to Wahoo's consent page. After granting access, the callback stores the OAuth2 token in SQLite. The token refreshes automatically before every API call (tokens expire every 2 hours).
+## Manual Operations
 
-### 3. Trigger a sync
+### Sync workouts
 
 ```bash
 curl -X POST http://localhost:8080/api/sync
 ```
 
-Response:
-```json
-{"inserted": 47, "skipped": 0, "errors": null}
-```
-
-Subsequent calls are idempotent — workouts already in the database are skipped:
-```json
-{"inserted": 0, "skipped": 47, "errors": null}
-```
-
-FIT files are downloaded to `$FIT_FILES_PATH` (default `/data/fit_files/`) alongside each ingested workout. They are used by the analysis engine in a later phase.
-
-### 4. Verify ingestion
+Optional date range:
 
 ```bash
-sqlite3 /data/cycling.db "SELECT wahoo_id, started_at, avg_power, processed FROM workouts ORDER BY started_at DESC LIMIT 5;"
-```
-
-## Telegram delivery
-
-Set credentials in `.env`:
-
-```env
-TELEGRAM_BOT_TOKEN=<your bot token from @BotFather>
-TELEGRAM_CHAT_ID=<your numeric Telegram chat/user ID>
-```
-
-Delivery is **optional** — the server starts normally without these values, but `POST /api/report/send` will return 503 and the scheduled Sunday delivery job will be skipped.
-
-### Manual send
-
-Send a specific report by ID (generate one first with `POST /api/report`):
-
-```bash
-curl -X POST http://localhost:8080/api/report/send \
+curl -X POST http://localhost:8080/api/sync \
   -H 'Content-Type: application/json' \
-  -d '{"report_id": 1}'
+  -d '{"from":"2026-03-01","to":"2026-03-31"}'
 ```
 
-### View report HTML
-
-Full report pages are served at:
-
-```
-GET /reports/{id}    → weekly report
-GET /plans/{id}      → weekly training plan
-```
-
-These are protected by Cloudflare Access in production.
-
-### Delivery state
-
-Each send attempt is recorded in the `report_deliveries` table:
+### Process FIT files
 
 ```bash
-sqlite3 /data/cycling.db \
-  "SELECT r.type, r.week_start, d.status, d.sent_at, d.error
-   FROM report_deliveries d
-   JOIN reports r ON r.id = d.report_id
-   ORDER BY r.week_start DESC;"
+curl -X POST http://localhost:8080/api/process
 ```
 
-| status | meaning |
-|--------|---------|
-| `pending` | delivery record created, not yet sent |
-| `sent` | successfully delivered to Telegram |
-| `failed` | last send attempt failed (error column has details) |
-
-A failed delivery can be retried by calling `POST /api/report/send` again with the same `report_id`.
-
-## Scheduled pipeline
-
-The scheduler starts automatically with the server and runs three jobs:
-
-| Job | Schedule | What |
-|-----|----------|------|
-| Wahoo sync | Every 4 hours | Polls for workouts missed by the webhook |
-| FIT processing | Every 15 min | Reserved for Phase 6 analysis engine |
-| Weekly report + delivery | Sunday 20:00 CET | Generates report + plan for current week, sends both via Telegram |
-
-### Run the full pipeline manually
+Reprocess everything:
 
 ```bash
-# 1. Sync rides
-curl -X POST http://localhost:8080/api/sync
+curl -X POST http://localhost:8080/api/process \
+  -H 'Content-Type: application/json' \
+  -d '{"reprocess_all":true}'
+```
 
-# 2. Generate report for a specific week
+### Generate a weekly report or plan
+
+```bash
 curl -X POST http://localhost:8080/api/report \
   -H 'Content-Type: application/json' \
   -d '{"type":"weekly_report","week_start":"2026-03-23"}'
-# → {"id":1}
+```
 
-# 3. Send via Telegram
+```bash
+curl -X POST http://localhost:8080/api/report \
+  -H 'Content-Type: application/json' \
+  -d '{"type":"weekly_plan","week_start":"2026-03-30","user_prompt":"Travelling Tuesday, keep Wednesday short"}'
+```
+
+### Send a generated report
+
+```bash
 curl -X POST http://localhost:8080/api/report/send \
   -H 'Content-Type: application/json' \
   -d '{"report_id":1}'
-# → {"status":"sent"}
 ```
+
+## Data Model
+
+Main tables:
+
+- `wahoo_tokens`
+- `workouts`
+- `ride_metrics`
+- `athlete_notes`
+- `athlete_config`
+- `reports`
+- `report_deliveries`
+- `workout_types`
+
+Migrations are defined in [`internal/storage/db.go`](/Users/ananchev/Development/cycling-coach/internal/storage/db.go).
+
+## Rendering Note
+
+Report HTML is currently rendered by inline Go code in [`internal/reporting/renderer.go`](/Users/ananchev/Development/cycling-coach/internal/reporting/renderer.go) and stored in the database.
+
+The repo also still contains:
+
+- [`templates/report.html`](/Users/ananchev/Development/cycling-coach/templates/report.html)
+- [`templates/plan.html`](/Users/ananchev/Development/cycling-coach/templates/plan.html)
+- [`static/style.css`](/Users/ananchev/Development/cycling-coach/static/style.css)
+
+These files are packaged into the image but are not the active rendering path used by the current implementation.
 
 ## Development
 
 ```bash
-make dev     # Run locally
-make test    # Run tests
-make lint    # Run linter
-make build   # Build Docker image
-make run     # Start with docker compose
+make dev
+make test
+make lint
+make build
+make run
 ```
+
+## Related Docs
+
+- [`CLAUDE.md`](/Users/ananchev/Development/cycling-coach/CLAUDE.md) for repo-specific development guidance
+- [`ARCHITECTURE.md`](/Users/ananchev/Development/cycling-coach/ARCHITECTURE.md) for an implementation-aligned architecture summary

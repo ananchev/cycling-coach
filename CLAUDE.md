@@ -1,149 +1,199 @@
 # CLAUDE.md — Project Instructions for Claude Code
 
-## What this project is
+## Ground Rule
 
-A personal cycling training assistant that:
-1. Automatically ingests ride data from a Wahoo KICKR trainer via the Wahoo Cloud API
-2. Accepts subjective training notes (RPE, sleep, stress) via a Telegram bot
-3. Analyzes every ride: HR zones, power zones, HR drift, NP, TSS, TRIMP
-4. Generates weekly reports and training plans using Claude API
-5. Delivers compact summaries via Telegram, full reports as web pages
+The current Go implementation is authoritative. If this file, `README.md`, or `ARCHITECTURE.md` disagrees with the code, follow the code.
 
-## Two markdown files — different purposes
+## What This Project Is
 
-| File | Purpose | Lives where | Updated how |
-|---|---|---|---|
-| `CLAUDE.md` (this file) | Dev instructions for Claude Code | Repo root, checked into git | Edit in repo |
-| Athlete profile | Training context: zones, FTP, coaching philosophy. Used as Claude API system prompt at runtime. | `/data/athlete-profile.md` (Docker volume) | Via Telegram `/profile` command, web upload, or direct file edit |
+A personal cycling training assistant that currently:
 
-The athlete profile is **runtime configuration, not source code**. It is never baked into the Docker image. The app loads it from the data volume when calling the Claude API. A seed file ships at `config/athlete-profile.default.md` and is copied to the data volume on first startup if no profile exists yet.
+1. Connects to Wahoo through OAuth2
+2. Ingests workouts through webhook and manual/scheduled sync
+3. Downloads FIT files when available
+4. Computes ride metrics from FIT files
+5. Accepts subjective notes and body metrics through Telegram
+6. Generates weekly reports and weekly plans with Claude
+7. Stores rendered HTML in SQLite and optionally delivers summaries to Telegram
 
-## Architecture
+## Current Stack
 
-Read `ARCHITECTURE.md` for the full system design, data flow, API details, and build phases. Follow the phased build order defined there.
+- Language: Go 1.24 in `go.mod`
+- HTTP: `github.com/go-chi/chi/v5`
+- Database: SQLite via `github.com/mattn/go-sqlite3`
+- OAuth2: `golang.org/x/oauth2`
+- FIT parsing: `github.com/muktihari/fit`
+- Scheduling: `github.com/robfig/cron/v3`
+- Telegram: `github.com/go-telegram-bot-api/telegram-bot-api/v5`
+- Logging: `log/slog`
+- Claude API: raw `net/http`
 
-## Stack
+## Current Layout
 
-- **Language:** Go 1.22+, CGO enabled (required for SQLite)
-- **HTTP:** `github.com/go-chi/chi/v5`
-- **Database:** SQLite via `github.com/mattn/go-sqlite3`
-- **Telegram:** `github.com/go-telegram-bot-api/telegram-bot-api/v5`
-- **FIT parsing:** `github.com/muktihari/fit`
-- **Scheduling:** `github.com/robfig/cron/v3`
-- **OAuth2:** `golang.org/x/oauth2`
-- **Logging:** `log/slog` (stdlib)
-- **Claude API:** raw `net/http` (no SDK — simple JSON POST to `https://api.anthropic.com/v1/messages`)
-- **Deployment:** Docker on homelab, behind Cloudflare + Nginx Proxy Manager
-
-## Code conventions
-
-- Standard Go formatting (`gofmt`)
-- Errors: always wrap with context → `fmt.Errorf("wahoo.RefreshToken: %w", err)`
-- Logging: use `log/slog` with structured fields → `slog.Info("workout processed", "wahoo_id", id, "drift_pct", drift)`
-- No global state. Pass dependencies via structs (dependency injection through constructors)
-- Use `context.Context` for cancellation and timeouts on all external calls (Wahoo API, Claude API, Telegram)
-- Tests: table-driven, `_test.go` files alongside code
-- Database: `database/sql` directly, no ORM. Migrations run on startup in `internal/storage/db.go`
-
-## Project layout
-
-```
-cmd/server/          → main entry point
-cmd/backfill/        → one-shot: fetch all historical workouts from Wahoo
-cmd/import-csv/      → one-shot: import Wahoo CSV exports
-cmd/reset/           → one-shot: wipe DB, reimport everything
-internal/config/     → env var loading
-internal/wahoo/      → OAuth2 + API client + webhook
-internal/telegram/   → bot + command handlers
-internal/fit/        → FIT file parsing
-internal/analysis/   → metrics computation + trends
-internal/reporting/  → Claude API + HTML rendering + delivery
-internal/scheduler/  → cron jobs
-internal/storage/    → SQLite (all DB access)
-internal/web/        → HTTP router + handlers + middleware
-config/              → default/seed config files (athlete-profile.default.md)
-templates/           → HTML templates for report pages
-static/              → CSS for report pages
+```text
+cmd/server/          main entrypoint
+internal/config/     environment loading
+internal/wahoo/      OAuth, API client, sync, webhook models/handler
+internal/telegram/   bot and outbound sender
+internal/fit/        FIT parsing
+internal/analysis/   metric computation and FIT processing pipeline
+internal/reporting/  prompt assembly, Claude calls, rendering, delivery, profile evolution
+internal/scheduler/  cron wiring
+internal/storage/    SQLite migrations and CRUD helpers
+internal/web/        router, handlers, middleware, admin UI, SSE log stream
+config/              seed athlete profile
+templates/           packaged but not the active report rendering path
+static/              packaged but not the active report rendering path
+testdata/            sample FIT file
 ```
 
-## Athlete profile as runtime config
+## Current Runtime Wiring
 
-The athlete profile contains zones, FTP, HRmax, coaching philosophy, and training history. It is the system prompt sent to the Claude API for report/plan generation.
+`cmd/server/main.go` wires:
 
-**Storage:** The canonical copy lives at `$ATHLETE_PROFILE_PATH` (default: `/data/athlete-profile.md`). On first startup, if this file doesn't exist, the app copies `config/athlete-profile.default.md` to the data volume.
+- config load
+- slog tee handler + SSE log broadcaster
+- SQLite open + migrations
+- athlete profile bootstrap
+- FIT files directory creation
+- Wahoo auth handler, client, syncer, webhook handler
+- athlete config seeding
+- FIT processor
+- Claude provider and report orchestrator
+- optional Telegram delivery service and inbound Telegram bot
+- optional cron scheduler
+- HTTP router
 
-**Structured config (DB):** Key numeric values (FTP, HRmax, weight, zone boundaries) are also stored in an `athlete_config` table in SQLite. The analysis engine reads zone boundaries and thresholds from this table — it never parses the markdown file for numbers. When the profile is updated, the app extracts structured values and syncs them to the DB.
+## Current Config Surface
 
-**Update paths:**
-- Telegram: `/profile` sends current profile as a document; `/profile set` accepts a new markdown file as attachment
-- Web: `POST /api/profile` accepts markdown body (protected by Cloudflare Access)
-- Direct file edit: edit `/data/athlete-profile.md` on the server, then call `/api/profile/reload`
+### Core env vars
 
-**Schema:**
+- `WAHOO_CLIENT_ID`
+- `WAHOO_CLIENT_SECRET`
+- `WAHOO_REDIRECT_URI`
+- `WAHOO_WEBHOOK_SECRET`
+- `TELEGRAM_BOT_TOKEN`
+- `TELEGRAM_CHAT_ID`
+- `ANTHROPIC_API_KEY`
+- `ANTHROPIC_MODEL`
+- `SERVER_ADDR`
+- `BASE_URL`
+- `DATABASE_PATH`
+- `FIT_FILES_PATH`
+- `ATHLETE_PROFILE_PATH`
 
-```sql
-CREATE TABLE athlete_config (
-    key        TEXT PRIMARY KEY,
-    value      TEXT NOT NULL,
-    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
-);
--- Keys: ftp_watts, hr_max, weight_kg,
---        hr_z1_max, hr_z2_max, hr_z3_max, hr_z4_max,
---        pwr_z1_max, pwr_z2_max, pwr_z3_max, pwr_z4_max
-```
+### Scheduler env vars
 
-The analysis engine reads from `athlete_config`. **Never hardcode zones or FTP.**
+- `CRON_SYNC`
+- `CRON_FIT_PROCESSING`
+- `CRON_WEEKLY_REPORT`
 
-Current defaults (for reference during development, not for hardcoding):
+Important: scheduled jobs are disabled unless their corresponding cron env var is set.
 
-**FTP:** 251W · **HRmax:** 184 bpm · **Weight:** ~90-91 kg  
-**HR Zones:** Z1 <110, Z2 110-127, Z3 128-145, Z4 146-164, Z5 ≥165  
-**Power Zones:** Z1 <138W, Z2 139-188W, Z3 189-226W, Z4 227-263W, Z5 264-301W  
-**Primary KPI:** HR drift (decoupling). <5% = excellent, 5-8% = acceptable, >8% = flag.
+## Athlete Profile
 
-## External APIs
+The canonical athlete profile is a markdown file at `ATHLETE_PROFILE_PATH`, defaulting to `/data/athlete-profile.md`.
 
-### Wahoo Cloud API
-- Base URL: `https://api.wahooligan.com`
-- Auth: OAuth2 (access token in `Authorization: Bearer` header)
-- Docs: `https://cloud-api.wahooligan.com/`
-- Access tokens expire every 2h; refresh before API calls
-- FIT file downloads from CDN don't need auth headers
+Current implementation details:
 
-### Claude API
-- Endpoint: `POST https://api.anthropic.com/v1/messages`
-- Model: `claude-sonnet-4-20250514`
-- System prompt: contents of the athlete profile (loaded from `$ATHLETE_PROFILE_PATH`)
-- Used only for weekly report + plan generation
+- on first startup, `config/athlete-profile.default.md` is copied into place if the runtime file does not exist
+- Claude receives the raw markdown as the system prompt for report and plan generation
+- Telegram `/profile` returns the current file
+- Telegram `/profile set` replaces the file after downloading the attached markdown
+- `/api/profile/evolve` uses recent weekly reports to rewrite the markdown via Claude
 
-### Telegram Bot API
-- Long-polling mode (not webhook)
-- Only respond to messages from the configured `TELEGRAM_CHAT_ID`
+Important limitation: the code does not currently parse the markdown back into `athlete_config`. Numeric training values used by analysis come from `athlete_config`, which is seeded in `cmd/server/main.go`.
 
-## Build & run
+## Current Telegram Behavior
+
+Implemented inbound commands:
+
+- `/help`
+- `/start`
+- `/ride`
+- `/note`
+- `/weight`
+- `/bodyfat`
+- `/muscle`
+- `/profile`
+- `/profile set`
+
+Not implemented despite older docs:
+
+- `/status`
+- `/week`
+- `/plan`
+
+## Current HTTP Surface
+
+Implemented routes:
+
+- `/health`
+- `/admin`
+- `/wahoo/authorize`
+- `/wahoo/callback`
+- `/wahoo/webhook`
+- `/reports/{id}`
+- `/plans/{id}`
+- `/api/sync`
+- `/api/process`
+- `/api/workout/reset-fit`
+- `/api/workout/ignore`
+- `/api/report`
+- `/api/report/send`
+- `/api/report/{id}`
+- `/api/profile/evolve`
+- `/api/body-metrics`
+- `/api/notes`
+- `/api/notes/{id}`
+- `/api/logs/stream`
+
+Not implemented despite older docs:
+
+- `GET /api/profile`
+- `POST /api/profile`
+- `POST /api/profile/reload`
+
+## Current Rendering Path
+
+The active report/plan rendering path is [`internal/reporting/renderer.go`](/Users/ananchev/Development/cycling-coach/internal/reporting/renderer.go), which builds HTML from an inline template and stores it in `reports.full_html`.
+
+The files under `templates/` and `static/` are not the active renderer today, even though they are still copied into the Docker image.
+
+## Conventions
+
+- Use standard Go formatting
+- Wrap errors with context
+- Use structured logging with `slog`
+- No global application state
+- Keep dependencies injected through constructors/struct fields
+- Use `context.Context` for external and long-running operations
+- Prefer tests alongside the implementation
+- Use `database/sql` directly
+
+## Testing
+
+Relevant current coverage exists for:
+
+- Wahoo client, sync, and webhook flows
+- FIT parsing
+- analysis metrics and processor behavior
+- storage CRUD and migrations
+- Claude provider and report assembly/orchestration
+- Telegram sender and RPE parsing
+- SSE log stream
+
+Run:
 
 ```bash
-make dev          # Run locally (go run)
-make build        # Build Docker image
-make run          # docker compose up -d
-make test         # go test ./...
-make lint         # golangci-lint run
+go test ./...
 ```
 
-## Important constraints
+## Cleanup Guidance
 
-- Wahoo sandbox rate limit: 25 requests per 5 minutes. Add sleep/throttling in backfill.
-- SQLite: single writer. No concurrent writes needed (single-user system).
-- CGO: required for go-sqlite3. Dockerfile uses `gcc musl-dev` in build stage.
-- Cloudflare Access protects `/reports/*` and `/plans/*`. Wahoo paths (`/wahoo/*`) must bypass Access.
-- Telegram bot runs as a goroutine inside the main server process (not a separate binary).
-- All times in CET/Europe/Amsterdam timezone.
-- Athlete profile is runtime config, not build-time. Never hardcode zones or FTP.
+When cleaning up docs or dead assets:
 
-## Testing approach
-
-- Unit tests for analysis/metrics (known inputs → expected outputs)
-- Unit tests for FIT parsing (use `testdata/sample.fit`)
-- Integration tests for storage layer (in-memory SQLite)
-- Manual testing for Wahoo OAuth flow and Telegram bot
-- Test the full pipeline with historical CSV data before enabling live ingestion
+- align docs to the current implementation
+- do not revive outdated design assumptions in docs
+- explicitly label inactive assets and stale plans as inactive
+- remove dead files only in focused cleanup changes, not mixed with behavior work
