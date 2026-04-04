@@ -1,8 +1,68 @@
 # cycling-coach
 
-Personal cycling training assistant. It ingests workouts from Wahoo, stores subjective notes from Telegram, computes ride metrics from FIT files, generates weekly reports and plans with Claude, and can deliver summaries through Telegram.
+Personal cycling training assistant. It ingests workouts from Wahoo, stores subjective notes from Telegram and the admin UI, computes ride metrics from FIT files, generates weekly reports and plans with Claude, and can deliver summaries through Telegram.
+
+This is my first vibe-coded app. The implementation was still reviewed carefully for architecture decisions, code patterns, and runtime behavior, but the project started from that workflow and keeps that spirit.
 
 This file describes the implementation that exists in the repository today. When docs and code differ, the code is the source of truth.
+
+## Core Coaching Loop
+
+The intended use of the app is an AI-assisted weekly coaching cycle:
+
+0. Maintain an athlete profile that describes the athlete, constraints, zones, training history, and coaching instructions
+1. Generate a weekly plan with Claude before the week starts
+2. Execute the week and let workouts arrive from Wahoo
+3. Add notes and body metrics to explain what happened in real life
+4. Generate the weekly report so Claude can analyze compliance, workout quality, fatigue signals, and trends
+5. Use that report as context for the next weekly plan
+
+That plan -> execution -> report -> next plan loop is the main feature of the app.
+
+The athlete profile is the base context for this loop. It is stored as markdown, sent to Claude during report and plan generation, and acts as the long-lived coaching memory for the app. It describes things like goals, constraints, zone interpretation, training philosophy, warning flags, and current phase.
+
+The profile can evolve over time. The app includes an "Evolve Profile" flow that uses recent weekly reports to refresh the training-history and current-phase sections while preserving the protected coaching structure.
+
+```mermaid
+flowchart LR
+    P[Athlete Profile] --> W[Weekly Plan with Claude]
+    W --> E[Execute Training Week]
+    E --> N[Workouts, Notes, Body Metrics]
+    N --> R[Weekly Report with Claude]
+    R --> U[Evolve Profile / Update Context]
+    U --> P
+    R --> W
+```
+
+## User-Facing Flows
+
+### 1. Connect Wahoo once
+
+- Open `/wahoo/authorize`
+- Complete the Wahoo OAuth flow
+- The app stores the token and can then ingest workouts through webhook and sync
+
+### 2. Use the admin UI as the main control surface
+
+- Open `/admin`
+- Review workouts, processing status, notes, reports, body metrics, and logs
+- Trigger sync, FIT processing, report generation, delivery, and profile evolution from the UI
+- Inspect per-workout details through the workout action icons
+
+### 3. Keep daily context up to date
+
+- Add ride notes and general notes from Telegram or from the admin UI
+- Track weight, body fat, and muscle metrics over time
+- Keep the athlete profile current so Claude has the right long-term context
+- If no workout exists by 23:50 local time, the app creates a placeholder day entry so the timeline stays complete
+
+### 4. Generate weekly outputs
+
+- Create a weekly plan before the week starts
+- Execute the week and capture notes/context as needed
+- Create a weekly report for the completed week
+- Review rendered HTML in the browser
+- Optionally send the summary and link to Telegram
 
 ## Current Runtime Flow
 
@@ -34,11 +94,22 @@ This file describes the implementation that exists in the repository today. When
 
 ### Reporting
 
+- Weekly plan first workflow
 - Weekly report generation
 - Weekly plan generation
+- Claude analysis of completed weeks using workouts, metrics, notes, and athlete profile context
 - HTML rendering stored in `reports.full_html`
 - Telegram delivery with persisted delivery state and retry support
 - Athlete profile evolution from recent weekly reports
+
+### Athlete Profile
+
+- Markdown-based long-lived coaching context
+- Used as base prompt context for both weekly plans and weekly reports
+- Stored outside the database as a runtime file at `ATHLETE_PROFILE_PATH`
+- Bootstrapped from `config/athlete-profile.default.md` on first startup
+- Can be updated manually or evolved from recent reports through the admin UI
+- Contains protected sections required by the profile-evolution flow
 
 ### Telegram
 
@@ -145,6 +216,33 @@ One scheduler job is always registered in code and is not env-controlled:
 
 If a real Wahoo workout for that same day arrives later, the placeholder workout is automatically reconciled away and any notes linked to it are moved onto the real workout.
 
+## Main Interaction: Admin UI
+
+After configuration, the admin UI is the primary way to use the app.
+
+Open:
+
+```text
+http://localhost:8080/admin
+```
+
+From there you can:
+
+- review workouts and their processing state
+- open ride notes and general notes
+- inspect the summary row sent to Claude
+- inspect the per-ride zone detail sent to Claude
+- download FIT time-series CSV data
+- trigger sync and FIT processing
+- generate weekly reports and plans
+- send reports through Telegram
+- inspect logs live through SSE-backed log streaming
+- review body metrics with date filtering
+- review and evolve the athlete profile
+- evolve the athlete profile
+
+The backend HTTP endpoints still exist and are useful for automation or debugging, but they are secondary to the admin UI for day-to-day use.
+
 ## Quick Start
 
 ```bash
@@ -158,13 +256,55 @@ On first startup:
 - `config/athlete-profile.default.md` is copied to `ATHLETE_PROFILE_PATH` if no runtime athlete profile exists
 - default athlete config values are seeded into `athlete_config` if keys are missing
 
-Then open:
+Then:
 
 ```text
-http://localhost:8080/wahoo/authorize
+1. Open http://localhost:8080/wahoo/authorize
+2. Complete Wahoo authorization
+3. Open http://localhost:8080/admin
 ```
 
-## Manual Operations
+## Admin UI Walkthrough
+
+### Workouts
+
+- See each day’s workout row, keyed visually by external `wahoo_id`
+- Use a single data/action column for ride notes, general notes, summary preview, zone preview, and FIT CSV download
+- Grey icons indicate that a note or workout-derived artifact is not available for that day
+- Placeholder rows fill in days with no recorded workout yet
+
+### Notes
+
+- Add, edit, and delete notes directly from the admin UI
+- Use notes to explain skipped sessions, changed workouts, fatigue, travel, or other context
+- Ride-linked and general notes are both visible from the workout/day context
+
+### Body Metrics
+
+- Review weight, body fat, and muscle mass over time
+- Filter charts by `From` / `To` date range
+
+### Reports and Plans
+
+- Generate weekly plans from the current athlete profile and recent context
+- Generate weekly reports that compare completed training against intent and actual outcomes
+- Open rendered HTML pages in the browser
+- Send generated outputs to Telegram when delivery is configured
+
+### Athlete Profile
+
+- Treat the athlete profile as the coaching baseline for the AI
+- Edit it when goals, constraints, or coaching guidance change
+- Use "Evolve Profile" when you want the app to refresh the long-term narrative from recent reports
+
+### Logs
+
+- Watch application logs live from the admin UI
+- Use this to confirm webhook arrival, sync behavior, processing, and report generation
+
+## API / Curl Examples
+
+The HTTP API remains available for automation, testing, and debugging.
 
 ### Sync workouts
 
@@ -258,28 +398,6 @@ Main tables:
 - `workout_types`
 
 The `workouts` table now also stores synthetic manual placeholder rows for days where no workout was recorded by 23:50 local time. These placeholders are created with source `manual`, are marked processed immediately, and can later be replaced automatically by a real Wahoo workout from the same day.
-
-## Admin UI Notes
-
-In the workouts tab:
-
-- the primary identifier shown is the external `wahoo_id`
-- ride notes and general notes are always shown as icons, with grey indicating absence
-- the data/actions column includes:
-  - ride notes
-  - general notes
-  - summary-row popup
-  - per-ride zone-detail popup
-  - FIT time-series CSV download
-
-In the body tab:
-
-- weight, body fat, and muscle mass charts can be filtered by `From` / `To` date
-
-In the notes modal:
-
-- existing notes can still be viewed, edited, and deleted
-- new notes can now be created directly from the admin UI
 
 Migrations are defined in [`internal/storage/db.go`](/Users/ananchev/Development/cycling-coach/internal/storage/db.go).
 

@@ -1,5 +1,6 @@
 # Binaries
 cycling-coach
+server
 *.exe
 
 # Environment
@@ -12,6 +13,7 @@ data/
 # IDE
 .vscode/
 .idea/
+.claude/
 
 # OS
 .DS_Store
