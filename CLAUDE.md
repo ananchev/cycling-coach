@@ -13,7 +13,7 @@ A personal cycling training assistant that currently:
 3. Downloads FIT files when available
 4. Computes ride metrics from FIT files
 5. Accepts subjective notes and body metrics through Telegram
-6. Generates weekly reports and weekly plans with Claude
+6. Generates report/plan periods with Claude
 7. Stores rendered HTML in SQLite and optionally delivers summaries to Telegram
 
 ## Current Stack
@@ -37,7 +37,7 @@ internal/wahoo/      OAuth, API client, sync, webhook models/handler
 internal/telegram/   bot and outbound sender
 internal/fit/        FIT parsing
 internal/analysis/   metric computation and FIT processing pipeline
-internal/reporting/  prompt assembly, Claude calls, rendering, delivery, profile evolution
+internal/reporting/  prompt assembly, Claude calls, rendering, delivery, profile evolution, progress interpretation
 internal/scheduler/  cron wiring
 internal/storage/    SQLite migrations and CRUD helpers
 internal/web/        router, handlers, middleware, admin UI, SSE log stream
@@ -116,7 +116,7 @@ Current implementation details:
 - Claude receives the raw markdown as the system prompt for report and plan generation
 - Telegram `/profile` returns the current file
 - Telegram `/profile set` replaces the file after downloading the attached markdown
-- `/api/profile/evolve` uses recent weekly reports to rewrite the markdown via Claude
+- `/api/profile/evolve` uses recent reports to rewrite the markdown via Claude
 
 Important limitation: the code does not currently parse the markdown back into `athlete_config`. Numeric training values used by analysis come from `athlete_config`, which is seeded in `cmd/server/main.go`.
 
@@ -156,9 +156,13 @@ Implemented routes:
 - `/api/workout/reset-fit`
 - `/api/workout/ignore`
 - `/api/report`
+- `/api/report/close-block`
 - `/api/report/send`
 - `/api/report/{id}`
+- `/api/report/{id}/prompts`
 - `/api/profile/evolve`
+- `/api/progress`
+- `/api/progress/interpret`
 - `/api/body-metrics`
 - `/api/workouts/{id}/data`
 - `/api/workouts/{id}/timeseries.csv`
@@ -177,6 +181,8 @@ Not implemented despite older docs:
 
 The active report/plan rendering path is [`internal/reporting/renderer.go`](/Users/ananchev/Development/cycling-coach/internal/reporting/renderer.go), which builds HTML from an inline template and stores it in `reports.full_html`.
 
+Current user-facing wording intentionally uses `Training Report`, `Training Plan`, and explicit period ranges rather than assuming a fixed calendar week, even though the internal enum values remain `weekly_report` and `weekly_plan`.
+
 Separate from report rendering, the admin UI also exposes modal-only workout views built from [`internal/reporting/ride_view.go`](/Users/ananchev/Development/cycling-coach/internal/reporting/ride_view.go):
 
 - a fixed-width summary row preview
@@ -188,9 +194,13 @@ These are admin display helpers only; they do not change the Claude prompt forma
 
 - workouts are shown primarily by external `wahoo_id`, not internal SQLite row id
 - body metrics support backend date filtering
+- the primary report/plan workflow in the UI is `Close Block & Generate Next Plan`
+- the close-block workflow infers block start from the day after the latest saved report, with a one-time manual bootstrap start when no prior report exists
 - notes can be created from the admin UI as well as edited/deleted there
 - workouts expose a FIT time-series CSV download when a FIT file exists
 - a placeholder manual workout may appear for a day with no recorded workout; if a real workout arrives later for that day, the placeholder is reconciled away and its notes are moved
+- the Reports & Plans table combines both artifact types, orders them in natural workflow order, and exposes saved system/user prompts through icons
+- the Progress page exposes KPI snapshots, selected-vs-prior comparison, and a single saved AI interpretation with saved prompts
 
 ## Conventions
 

@@ -48,6 +48,16 @@ var adminTmpl = template.Must(template.New("admin").Funcs(template.FuncMap{
 			return `<span class="badge yellow">pending</span>`
 		}
 	},
+	"reportTypeLabel": func(t storage.ReportType) string {
+		switch t {
+		case storage.ReportTypeWeeklyReport:
+			return "Report"
+		case storage.ReportTypeWeeklyPlan:
+			return "Plan"
+		default:
+			return string(t)
+		}
+	},
 }).Parse(`<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -111,6 +121,27 @@ var adminTmpl = template.Must(template.New("admin").Funcs(template.FuncMap{
   .modal h3{margin-bottom:12px;font-size:1rem}
   .modal p{font-size:.9rem;line-height:1.5;white-space:pre-wrap}
   .modal button{margin-top:12px}
+  .progress-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px;margin:16px 0}
+  .progress-kpi{border:1px solid #e5e7eb;border-radius:8px;padding:14px;background:#fafafa;min-height:220px}
+  .progress-kpi h3{font-size:.95rem;margin-bottom:4px}
+  .progress-kpi .explain{font-size:.82rem;color:#666;line-height:1.45;margin-bottom:10px}
+  .progress-kpi .metric-label{font-size:.72rem;color:#888;text-transform:uppercase;letter-spacing:.04em;margin-top:8px;margin-bottom:2px}
+  .progress-kpi .value{font-size:1.5rem;font-weight:700;line-height:1.15}
+  .progress-kpi .trend-text{font-size:1.05rem;font-weight:700;line-height:1.2}
+  .progress-kpi .delta{font-size:.82rem;color:#555}
+  .progress-kpi .empty-note{font-size:.8rem;color:#8b5e00;line-height:1.4;margin-top:6px}
+  .trend-up{color:#166534}
+  .trend-down{color:#991b1b}
+  .trend-steady{color:#6b7280}
+  .progress-analysis{background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:14px;line-height:1.6;font-size:.92rem}
+  .progress-analysis h1,.progress-analysis h2,.progress-analysis h3{margin:16px 0 8px;font-size:1.05rem;color:#111}
+  .progress-analysis h1{font-size:1.15rem}
+  .progress-analysis p{margin-bottom:10px}
+  .progress-analysis ul,.progress-analysis ol{margin:0 0 12px 20px}
+  .progress-analysis li{margin-bottom:4px}
+  .progress-analysis strong{font-weight:700}
+  .progress-analysis em{font-style:italic}
+  .progress-analysis code{background:#eef2f7;padding:1px 4px;border-radius:3px;font-size:.88em}
 </style>
 </head>
 <body>
@@ -118,9 +149,10 @@ var adminTmpl = template.Must(template.New("admin").Funcs(template.FuncMap{
 
 <div class="tabs">
   <div class="tab{{if eq .ActiveTab "actions"}} active{{end}}" onclick="switchTab('actions')">Actions</div>
-  <div class="tab{{if eq .ActiveTab "workouts"}} active{{end}}" onclick="switchTab('workouts')">Workouts ({{len .Workouts}})</div>
-  <div class="tab{{if eq .ActiveTab "reports"}} active{{end}}" onclick="switchTab('reports')">Reports ({{len .Reports}})</div>
+  <div class="tab{{if eq .ActiveTab "workouts"}} active{{end}}" onclick="switchTab('workouts')">Workouts</div>
+  <div class="tab{{if eq .ActiveTab "reports"}} active{{end}}" onclick="switchTab('reports')">Reports & Plans</div>
   <div class="tab{{if eq .ActiveTab "body"}} active{{end}}" onclick="switchTab('body')">Body Metrics</div>
+  <div class="tab{{if eq .ActiveTab "progress"}} active{{end}}" onclick="switchTab('progress')">Progress</div>
   <div class="tab{{if eq .ActiveTab "logs"}} active{{end}}" onclick="switchTab('logs')">Logs</div>
 </div>
 
@@ -158,26 +190,36 @@ var adminTmpl = template.Must(template.New("admin").Funcs(template.FuncMap{
   <div class="result" id="proc-result"></div>
 </div>
 
-<!-- GENERATE REPORT -->
+<!-- CLOSE BLOCK -->
 <div class="card">
-  <h2>Generate Report</h2>
+  <h2>Close Block & Generate Next Plan</h2>
+  <div style="margin-bottom:8px">
+    {{if .PreviousBlockStart}}
+    <p class="hint" id="close-block-prev">Previous closed block: {{.PreviousBlockStart}} to {{.PreviousBlockEnd}}</p>
+    {{else}}
+    <p class="hint" id="close-block-prev">Previous closed block: none yet</p>
+    {{end}}
+    <p class="hint" id="close-block-interval">{{.CurrentIntervalText}}</p>
+  </div>
   <div class="row">
     <div class="field">
-      <label>Type</label>
-      <select id="report-type">
-        <option value="weekly_report">Weekly Report</option>
-        <option value="weekly_plan">Weekly Plan</option>
-      </select>
+      <label>Block start</label>
+      <input type="date" id="close-block-start" value="{{.InferredBlockStart}}" {{if .HasPreviousClosedReport}}disabled{{end}}>
     </div>
-    <div class="field"><label>Week start</label><input type="date" id="report-week"></div>
-    <button id="gen-btn" onclick="runGenerate()"><span class="spinner" id="gen-spin"></span>Generate</button>
+    <div class="field"><label>Block end</label><input type="date" id="close-block-end" value="{{.CurrentDate}}"></div>
+    <button id="close-block-btn" onclick="runCloseBlock()"><span class="spinner" id="close-block-spin"></span>Close Block</button>
   </div>
-  <div id="user-prompt-field" style="display:none;margin-top:12px">
-    <label>Constraints / notes for Claude (optional)</label>
-    <textarea id="user-prompt" rows="3" style="width:100%;padding:8px 10px;border:1px solid #ccc;border-radius:4px;font-size:.9rem;font-family:inherit;resize:vertical" placeholder="e.g. Travelling Tuesday, only 30 min available on Wednesday, prefer outdoor ride on Saturday..."></textarea>
-    <p class="hint">Free-text instructions passed to Claude when generating the plan.</p>
+  {{if .HasPreviousClosedReport}}
+  <p class="hint" style="margin-top:8px">Block start is inferred automatically from the day after the last closed report.</p>
+  {{else}}
+  <p class="hint" style="margin-top:8px">Block start is needed only for the first close-block run, before any previous closed report exists.</p>
+  {{end}}
+  <div style="margin-top:12px">
+    <label>Clarification for the next plan (optional)</label>
+    <textarea id="close-block-prompt" rows="3" style="width:100%;padding:8px 10px;border:1px solid #ccc;border-radius:4px;font-size:.9rem;font-family:inherit;resize:vertical" placeholder="e.g. Shift the hard session later in the week, keep Saturday flexible, travel on Tuesday..."></textarea>
+    <p class="hint">Usually only the block end date is needed. The block start is inferred from the last saved report, then the finished-block report and the next 7-day plan are generated automatically. Block start is only needed for the first close-block run, before any previous report exists.</p>
   </div>
-  <div class="result" id="report-result"></div>
+  <div class="result" id="close-block-result"></div>
 </div>
 
 <!-- ATHLETE PROFILE -->
@@ -190,7 +232,7 @@ var adminTmpl = template.Must(template.New("admin").Funcs(template.FuncMap{
     </div>
     <button id="evolve-btn" onclick="runEvolveProfile()"><span class="spinner" id="evolve-spin"></span>Evolve Profile</button>
   </div>
-  <p class="hint">Sends the last N weekly reports to Claude and rewrites the athlete profile. The current profile is backed up with a timestamp suffix before being replaced.</p>
+  <p class="hint">Sends the last N reports to Claude and rewrites the athlete profile. The current profile is backed up with a timestamp suffix before being replaced.</p>
   <div class="result" id="evolve-result"></div>
 </div>
 
@@ -264,27 +306,31 @@ var adminTmpl = template.Must(template.New("admin").Funcs(template.FuncMap{
 <!-- ==================== REPORTS TAB ==================== -->
 <div class="tab-pane{{if eq .ActiveTab "reports"}} active{{end}}" id="tab-reports">
 <div class="card">
-  <h2>Reports</h2>
+  <h2>Reports & Plans</h2>
   <form method="get" action="/admin" class="filter-form">
     <input type="hidden" name="tab" value="reports">
-    <div class="field"><label>From week</label><input type="date" name="from" value="{{.FilterFrom}}"></div>
-    <div class="field"><label>To week</label><input type="date" name="to" value="{{.FilterTo}}"></div>
+    <div class="field"><label>From start date</label><input type="date" name="from" value="{{.FilterFrom}}"></div>
+    <div class="field"><label>To start date</label><input type="date" name="to" value="{{.FilterTo}}"></div>
     <button type="submit">Filter</button>
     <a href="/admin?tab=reports"><button type="button" class="secondary">Reset</button></a>
   </form>
+  <p class="hint" style="margin-bottom:12px">This table intentionally combines weekly reports and weekly plans, because both are outputs of the same coaching workflow.</p>
   {{if .Reports}}
   <table>
     <thead><tr>
-      <th>#</th><th>Type</th><th>Week</th><th>Status</th><th>Actions</th>
+      <th>#</th><th>Type</th><th>Period Start</th><th>Status</th><th>Actions</th>
     </tr></thead>
     <tbody>
     {{range .Reports}}
     <tr id="row-{{.ID}}">
       <td>{{.ID}}</td>
-      <td>{{.Type}}</td>
+      <td>{{reportTypeLabel .Type}}</td>
       <td>{{fmtDate .WeekStart}}</td>
       <td>{{deliveryBadge .DeliveryStatus}}</td>
       <td>
+        <span class="icon-btn {{if .HasSystemPrompt}}active{{else}}muted{{end}}" onclick="showReportPrompt({{.ID}}, 'system')" title="View system prompt">🧠</span>
+        <span class="icon-btn {{if .HasUserPrompt}}active{{else}}muted{{end}}" onclick="showReportPrompt({{.ID}}, 'user')" title="View user prompt">📨</span>
+        &nbsp;
         <button class="act-btn secondary" onclick="sendReport({{.ID}})">Send</button>
         {{if .FullHTML}}&nbsp;<a href="{{if eq (print .Type) "weekly_plan"}}/plans/{{else}}/reports/{{end}}{{.ID}}" target="_blank"><button class="act-btn secondary">View</button></a>{{end}}
         &nbsp;<button class="act-btn danger" onclick="deleteReport({{.ID}})">Delete</button>
@@ -319,6 +365,44 @@ var adminTmpl = template.Must(template.New("admin").Funcs(template.FuncMap{
   <p id="body-empty" style="display:none;color:#888;font-size:.9rem">No body metrics recorded yet. Use the Telegram bot to log weight, body fat, and muscle mass.</p>
 </div>
 </div><!-- /tab-body -->
+
+<!-- ==================== PROGRESS TAB ==================== -->
+<div class="tab-pane{{if eq .ActiveTab "progress"}} active{{end}}" id="tab-progress">
+<div class="card">
+  <h2>Progress</h2>
+  <div class="row" style="margin-bottom:8px">
+    <div class="field"><label>From</label><input type="date" id="progress-from"></div>
+    <div class="field">
+      <label><input type="checkbox" id="progress-ef-filter" checked style="width:auto;margin-right:6px">Use endurance rides only for EF</label>
+      <span class="hint">Hard interval rides usually have high IF, and heart rate on those sessions lags, spikes, and recovers less steadily. That makes EF noisier and less useful as a pure aerobic-base signal.</span>
+    </div>
+  </div>
+  <div class="row" style="margin-bottom:12px">
+    <button type="button" onclick="loadProgress(true)">Apply</button>
+    <button type="button" class="secondary" onclick="resetProgressFilters()">Reset</button>
+    <button type="button" id="progress-interpret-btn" onclick="interpretProgress()"><span class="spinner" id="progress-interpret-spin"></span>Interpret Trends</button>
+  </div>
+  <p class="hint" id="progress-period-hint" style="margin-bottom:8px"></p>
+  <div class="result" id="progress-result"></div>
+  <div id="progress-kpis" class="progress-grid"></div>
+  <div id="progress-load-wrap" style="margin-top:18px">
+    <p class="hint" style="margin-bottom:10px">Weekly load is shown for both the selected period and the immediately preceding comparison period.</p>
+    <canvas id="chart-progress-load" height="220"></canvas>
+  </div>
+</div>
+<div class="card">
+  <h2>Saved Interpretation</h2>
+  <p class="hint" id="progress-saved-meta" style="margin-bottom:12px">
+    <span id="progress-saved-period">No saved interpretation yet.</span>
+    <span id="progress-prompt-actions" style="display:none">
+      <span style="margin:0 8px">|</span>
+      <span class="icon-btn active" onclick="showProgressPrompt('system')" title="View system prompt">🧠</span>
+      <span class="icon-btn active" onclick="showProgressPrompt('user')" title="View user prompt">📨</span>
+    </span>
+  </p>
+  <div id="progress-analysis" class="progress-analysis" style="display:none"></div>
+</div>
+</div><!-- /tab-progress -->
 
 <!-- ==================== LOGS TAB ==================== -->
 <div class="tab-pane{{if eq .ActiveTab "logs"}} active{{end}}" id="tab-logs">
@@ -356,7 +440,7 @@ var adminTmpl = template.Must(template.New("admin").Funcs(template.FuncMap{
 </div>
 
 <script>
-var tabNames = ['actions','workouts','reports','body','logs'];
+var tabNames = ['actions','workouts','reports','body','progress','logs'];
 function switchTab(name) {
   document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
   document.querySelectorAll('.tab-pane').forEach(p => p.classList.remove('active'));
@@ -491,33 +575,39 @@ async function resetFIT(wahooId) {
   } catch(e) { alert(e.toString()); }
 }
 
-// Show/hide user prompt textarea based on report type.
-document.getElementById('report-type').addEventListener('change', function() {
-  document.getElementById('user-prompt-field').style.display = this.value === 'weekly_plan' ? '' : 'none';
-});
-
-async function runGenerate() {
-  const type  = document.getElementById('report-type').value;
-  const week  = document.getElementById('report-week').value;
-  if (!week) { showResult('report-result', false, 'Please choose a week start date.'); return; }
-  setLoading('gen-btn', 'gen-spin', true);
-  showResult('report-result', true, 'Calling Claude API — this takes ~30 seconds...');
+async function runCloseBlock() {
+  const blockEnd = document.getElementById('close-block-end').value;
+  const startField = document.getElementById('close-block-start');
+  const initialBlockStart = startField.disabled ? '' : startField.value;
+  if (!blockEnd) { showResult('close-block-result', false, 'Please choose a block end date.'); return; }
+  setLoading('close-block-btn', 'close-block-spin', true);
+  showResult('close-block-result', true, 'Generating the closing report and the next plan. This may take a little while...');
   try {
-    const body = {type, week_start: week};
-    if (type === 'weekly_plan') {
-      const up = document.getElementById('user-prompt').value.trim();
-      if (up) body.user_prompt = up;
-    }
-    const r = await fetch('/api/report', {
+    const body = {block_end: blockEnd};
+    if (initialBlockStart) body.initial_block_start = initialBlockStart;
+    const up = document.getElementById('close-block-prompt').value.trim();
+    if (up) body.user_prompt = up;
+    const r = await fetch('/api/report/close-block', {
       method: 'POST',
       headers: {'Content-Type':'application/json'},
       body: JSON.stringify(body)
     });
-    const j = await r.json();
-    if (!r.ok) { showResult('report-result', false, JSON.stringify(j)); return; }
-    showResult('report-result', true, 'Report #' + j.id + ' generated. Reload page to see it.');
-  } catch(e) { showResult('report-result', false, e.toString()); }
-  finally { setLoading('gen-btn', 'gen-spin', false); }
+    const text = await r.text();
+    let j = {};
+    try { j = JSON.parse(text); } catch (_) {}
+    if (!r.ok) {
+      showResult('close-block-result', false, j.error || text || 'Close block flow failed.');
+      return;
+    }
+    showResult('close-block-result', true,
+      'Closed block ' + j.block_start + ' to ' + j.block_end +
+      ' and created the next plan for ' + j.plan_start + ' to ' + j.plan_end +
+      '. Reload page to see both entries.');
+  } catch(e) {
+    showResult('close-block-result', false, e.toString());
+  } finally {
+    setLoading('close-block-btn', 'close-block-spin', false);
+  }
 }
 
 async function sendReport(id) {
@@ -542,6 +632,29 @@ async function deleteReport(id) {
     if (row) row.remove();
     showResult('send-result', true, 'Report #' + id + ' deleted.');
   } catch(e) { showResult('send-result', false, e.toString()); }
+}
+
+async function showReportPrompt(id, kind) {
+  var title = document.getElementById('workout-data-title');
+  var body = document.getElementById('workout-data-body');
+  body.style.whiteSpace = 'pre-wrap';
+  body.style.wordBreak = 'break-word';
+  body.style.overflowWrap = 'anywhere';
+  title.textContent = kind === 'system' ? 'Report / Plan System Prompt' : 'Report / Plan User Prompt';
+  body.textContent = 'Loading...';
+  document.getElementById('workout-data-modal').classList.add('show');
+  try {
+    var r = await fetch('/api/report/' + id + '/prompts');
+    if (!r.ok) {
+      body.textContent = 'Failed to load saved prompts.';
+      return;
+    }
+    var j = await r.json();
+    var prompt = kind === 'system' ? j.system_prompt : j.user_prompt;
+    body.textContent = prompt || 'No saved ' + kind + ' prompt for this report.';
+  } catch(e) {
+    body.textContent = e.toString();
+  }
 }
 
 async function ignoreFIT(wahooId, btn) {
@@ -598,6 +711,9 @@ function closeWorkoutDataModal() {
 async function showWorkoutData(workoutId, kind) {
   var title = document.getElementById('workout-data-title');
   var body = document.getElementById('workout-data-body');
+  body.style.whiteSpace = 'pre';
+  body.style.wordBreak = 'normal';
+  body.style.overflowWrap = 'normal';
   title.textContent = kind === 'summary' ? 'Workout Summary Row' : 'Per-Ride Zone Detail';
   body.textContent = 'Loading...';
   document.getElementById('workout-data-modal').classList.add('show');
@@ -816,7 +932,7 @@ function drawChart(canvasId, label, labels, values, color) {
   var step = Math.max(1, Math.floor(labels.length / 6));
   for (var i = 0; i < labels.length; i += step) {
     var x = pad.left + (i / (labels.length - 1 || 1)) * cw;
-    ctx.fillText(labels[i].slice(5), x - 12, H - 8);
+    ctx.fillText(formatShortDate(labels[i]), x - 12, H - 8);
   }
 
   // Line + dots
@@ -836,14 +952,256 @@ function drawChart(canvasId, label, labels, values, color) {
   }
 }
 
+function formatShortDate(dateStr) {
+  if (!dateStr || dateStr.length < 10) return dateStr;
+  return dateStr.slice(8,10) + '-' + dateStr.slice(5,7);
+}
+
 // Auto-load charts when body tab is shown.
 var origSwitchTab = switchTab;
 switchTab = function(name) {
   origSwitchTab(name);
   if (name === 'body') loadBodyCharts();
+  if (name === 'progress') loadProgress();
 };
 if (tabNames.indexOf('body') >= 0 && document.getElementById('tab-body').classList.contains('active')) {
   loadBodyCharts();
+}
+if (tabNames.indexOf('progress') >= 0 && document.getElementById('tab-progress').classList.contains('active')) {
+  loadProgress();
+}
+
+// --- progress tab ---
+var progressLoaded = false;
+var currentSavedProgressAnalysis = null;
+function defaultProgressFrom() {
+  var d = new Date();
+  d.setDate(d.getDate() - 55);
+  return d.toISOString().slice(0, 10);
+}
+
+function loadProgress(forceReload) {
+  if (progressLoaded && !forceReload) return;
+  progressLoaded = true;
+  if (!document.getElementById('progress-from').value) {
+    document.getElementById('progress-from').value = defaultProgressFrom();
+  }
+  var from = document.getElementById('progress-from').value;
+  var aerobicOnly = document.getElementById('progress-ef-filter').checked;
+  var qs = new URLSearchParams();
+  qs.set('from', from);
+  if (!aerobicOnly) qs.set('aerobic_only_ef', '0');
+  fetch('/api/progress?' + qs.toString()).then(function(r) {
+    if (!r.ok) throw new Error('Failed to load progress data.');
+    return r.json();
+  }).then(renderProgress).catch(function(e) {
+    showResult('progress-result', false, e.toString());
+  });
+}
+
+function resetProgressFilters() {
+  document.getElementById('progress-from').value = defaultProgressFrom();
+  document.getElementById('progress-ef-filter').checked = true;
+  loadProgress(true);
+}
+
+function renderProgress(data) {
+  document.getElementById('progress-period-hint').textContent =
+    'Selected period: ' + data.selected_range.from + ' to ' + data.selected_range.to +
+    ' (' + data.selected_range.days + ' days). Calculated symmetric previous period for comparison: ' +
+    data.prior_range.from + ' to ' + data.prior_range.to + '.';
+
+  var kpiWrap = document.getElementById('progress-kpis');
+  kpiWrap.innerHTML = (data.kpis || []).map(function(kpi) {
+    var arrow = kpi.trend === 'up' ? '↑' : (kpi.trend === 'down' ? '↓' : '→');
+    var trendClass = 'trend-' + kpi.trend;
+    var emptyNote = '';
+    if (kpi.key === 'endurance_durability' && (kpi.current === null || kpi.current === undefined)) {
+      emptyNote = '<div class="empty-note">For this KPI, decoupling is only averaged from rides longer than 90 minutes. No qualifying long rides in selected period.</div>';
+    }
+    if (kpi.key === 'average_weight_kg' && ((kpi.current === null || kpi.current === undefined) || (kpi.prior === null || kpi.prior === undefined))) {
+      emptyNote = '<div class="empty-note">Average weight is only shown when both the selected period and the prior period have at least 3 recorded weight entries.</div>';
+    }
+    return '<div class="progress-kpi">'
+      + '<h3>' + escHtml(kpi.title) + '</h3>'
+      + '<div class="explain">' + escHtml(kpi.explanation) + '</div>'
+      + '<div class="metric-label">Value</div>'
+      + '<div class="value">' + formatProgressValue(kpi.key, kpi.current) + '</div>'
+      + '<div class="metric-label">Trend</div>'
+      + '<div class="trend-text ' + trendClass + '">' + arrow + ' ' + formatTrendText(kpi.trend) + '</div>'
+      + '<div class="metric-label">Comparison</div>'
+      + '<div class="delta">Prior: ' + formatProgressValue(kpi.key, kpi.prior)
+      + ' · Change: ' + formatProgressDelta(kpi.key, kpi.delta, kpi.delta_pct) + '</div>'
+      + emptyNote
+      + '</div>';
+  }).join('');
+
+  if ((data.weekly_load && data.weekly_load.length) || (data.prior_weekly_load && data.prior_weekly_load.length)) {
+    drawComparisonLoadChart('chart-progress-load', data.weekly_load || [], data.prior_weekly_load || []);
+    document.getElementById('progress-load-wrap').style.display = '';
+  } else {
+    document.getElementById('progress-load-wrap').style.display = 'none';
+  }
+
+  if (data.saved_analysis) {
+    currentSavedProgressAnalysis = data.saved_analysis;
+    document.getElementById('progress-saved-period').textContent =
+      'Saved interpretation period: ' + data.saved_analysis.from + ' to ' + data.saved_analysis.to +
+      ' · updated ' + data.saved_analysis.updated_at.replace('T', ' ').slice(0, 16);
+    document.getElementById('progress-prompt-actions').style.display = '';
+    var analysis = document.getElementById('progress-analysis');
+    analysis.innerHTML = data.saved_analysis.html || '';
+    analysis.style.display = '';
+  } else {
+    currentSavedProgressAnalysis = null;
+    document.getElementById('progress-saved-period').textContent = 'No saved interpretation yet.';
+    document.getElementById('progress-prompt-actions').style.display = 'none';
+    document.getElementById('progress-analysis').style.display = 'none';
+    document.getElementById('progress-analysis').innerHTML = '';
+  }
+}
+
+function showProgressPrompt(kind) {
+  if (!currentSavedProgressAnalysis) return;
+  var title = document.getElementById('workout-data-title');
+  var body = document.getElementById('workout-data-body');
+  body.style.whiteSpace = 'pre-wrap';
+  body.style.wordBreak = 'break-word';
+  body.style.overflowWrap = 'anywhere';
+  if (kind === 'system') {
+    title.textContent = 'Progress Interpretation System Prompt';
+    body.textContent = currentSavedProgressAnalysis.system_prompt || 'No system prompt saved.';
+  } else {
+    title.textContent = 'Progress Interpretation User Prompt';
+    body.textContent = currentSavedProgressAnalysis.user_prompt || 'No user prompt saved.';
+  }
+  document.getElementById('workout-data-modal').classList.add('show');
+}
+
+async function interpretProgress() {
+  var from = document.getElementById('progress-from').value;
+  if (!from) {
+    showResult('progress-result', false, 'Please choose a From date first.');
+    return;
+  }
+  setLoading('progress-interpret-btn', 'progress-interpret-spin', true);
+  showResult('progress-result', true, 'Calling Claude API — this may take ~30 seconds...');
+  try {
+    var r = await fetch('/api/progress/interpret', {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({
+        from: from,
+        aerobic_only_ef: document.getElementById('progress-ef-filter').checked
+      })
+    });
+    var text = await r.text();
+    var j = {};
+    try { j = JSON.parse(text); } catch (_) {}
+    if (!r.ok) {
+      showResult('progress-result', false, (j.error || text || 'Interpretation failed.'));
+      return;
+    }
+    showResult('progress-result', true, 'Interpretation saved for ' + j.from + ' to ' + j.to + '.');
+    loadProgress(true);
+  } catch(e) {
+    showResult('progress-result', false, e.toString());
+  } finally {
+    setLoading('progress-interpret-btn', 'progress-interpret-spin', false);
+  }
+}
+
+function formatProgressValue(key, value) {
+  if (value === null || value === undefined) return '—';
+  if (key === 'active_calories') return value.toFixed(0) + ' kcal';
+  if (key === 'completion_rate') return value.toFixed(1) + '%';
+  if (key === 'average_intensity_factor' || key === 'aerobic_efficiency' || key === 'average_weight_kg') return value.toFixed(2);
+  if (key === 'endurance_durability') return value.toFixed(1) + '%';
+  return value.toFixed(0);
+}
+
+function formatProgressDelta(key, delta, deltaPct) {
+  if ((key === 'endurance_durability' || key === 'completion_rate') && delta !== null && delta !== undefined) {
+    return (delta > 0 ? '+' : '') + delta.toFixed(1) + ' pp';
+  }
+  if (deltaPct !== null && deltaPct !== undefined) {
+    if (key === 'average_weight_kg' || key === 'average_intensity_factor' || key === 'aerobic_efficiency') {
+      var pct = deltaPct * 100;
+      return (pct > 0 ? '+' : '') + pct.toFixed(1) + '%';
+    }
+    var pct = deltaPct * 100;
+    return (pct > 0 ? '+' : '') + pct.toFixed(1) + '%';
+  }
+  if (delta === null || delta === undefined) return '—';
+  if (key === 'active_calories') return (delta > 0 ? '+' : '') + delta.toFixed(0) + ' kcal';
+  if (key === 'average_intensity_factor' || key === 'aerobic_efficiency' || key === 'average_weight_kg') return (delta > 0 ? '+' : '') + delta.toFixed(2);
+  return (delta > 0 ? '+' : '') + delta.toFixed(0);
+}
+
+function formatTrendText(trend) {
+  if (trend === 'up') return 'Up';
+  if (trend === 'down') return 'Down';
+  return 'Steady';
+}
+
+function drawComparisonLoadChart(canvasId, currentSeries, priorSeries) {
+  var canvas = document.getElementById(canvasId);
+  var ctx = canvas.getContext('2d');
+  var W = canvas.parentElement.offsetWidth - 2;
+  var H = 220;
+  canvas.width = W; canvas.height = H;
+  var pad = {top:30, right:20, bottom:30, left:55};
+  var cw = W - pad.left - pad.right;
+  var ch = H - pad.top - pad.bottom;
+  var labels = [];
+  var series = [];
+  if (currentSeries.length) {
+    labels = currentSeries.map(function(d) { return d.week_start; });
+    series.push({label: 'Selected TSS', color: '#2563eb', values: currentSeries.map(function(d) { return d.tss; })});
+    series.push({label: 'Selected TRIMP', color: '#dc2626', values: currentSeries.map(function(d) { return d.trimp; })});
+  }
+  if (priorSeries.length) {
+    if (!labels.length) labels = priorSeries.map(function(d) { return d.week_start; });
+    series.push({label: 'Prior TSS', color: '#93c5fd', values: priorSeries.map(function(d) { return d.tss; })});
+    series.push({label: 'Prior TRIMP', color: '#fca5a5', values: priorSeries.map(function(d) { return d.trimp; })});
+  }
+  var allValues = [];
+  series.forEach(function(s) { allValues = allValues.concat(s.values); });
+  var min = Math.min.apply(null, allValues);
+  var max = Math.max.apply(null, allValues);
+  var range = max - min || 1;
+  min -= range * 0.1; max += range * 0.1; range = max - min;
+  ctx.clearRect(0, 0, W, H);
+  ctx.fillStyle = '#555'; ctx.font = '600 13px system-ui'; ctx.fillText('Weekly Load Comparison', pad.left, 18);
+  ctx.strokeStyle = '#e5e7eb'; ctx.lineWidth = 1;
+  for (var i = 0; i <= 4; i++) {
+    var y = pad.top + ch - (i / 4) * ch;
+    ctx.beginPath(); ctx.moveTo(pad.left, y); ctx.lineTo(W - pad.right, y); ctx.stroke();
+    ctx.fillStyle = '#999'; ctx.font = '11px system-ui';
+    ctx.fillText((min + (i / 4) * range).toFixed(0), 4, y + 4);
+  }
+  ctx.fillStyle = '#999'; ctx.font = '11px system-ui';
+  for (var j = 0; j < labels.length; j++) {
+    var x = pad.left + (j / (labels.length - 1 || 1)) * cw;
+    ctx.fillText(formatShortDate(labels[j]), x - 18, H - 8);
+  }
+  series.forEach(function(s) {
+    ctx.strokeStyle = s.color; ctx.lineWidth = 2; ctx.beginPath();
+    for (var i = 0; i < s.values.length; i++) {
+      var x = pad.left + (i / (s.values.length - 1 || 1)) * cw;
+      var y = pad.top + ch - ((s.values[i] - min) / range) * ch;
+      if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+    }
+    ctx.stroke();
+  });
+  var legendX = W - pad.right - 130;
+  series.forEach(function(s, idx) {
+    ctx.fillStyle = s.color;
+    ctx.fillRect(legendX, 14 + idx * 16, 10, 10);
+    ctx.fillStyle = '#555';
+    ctx.font = '11px system-ui';
+    ctx.fillText(s.label, legendX + 16, 23 + idx * 16);
+  });
 }
 
 // --- live log stream ---
@@ -882,11 +1240,17 @@ initLogStream();
 `))
 
 type adminPageData struct {
-	Reports    []storage.ReportWithDelivery
-	Workouts   []storage.WorkoutWithMetrics
-	FilterFrom string
-	FilterTo   string
-	ActiveTab  string // "actions", "workouts", "reports"
+	Reports                 []storage.ReportWithDelivery
+	Workouts                []storage.WorkoutWithMetrics
+	FilterFrom              string
+	FilterTo                string
+	ActiveTab               string // "actions", "workouts", "reports"
+	HasPreviousClosedReport bool
+	InferredBlockStart      string
+	PreviousBlockStart      string
+	PreviousBlockEnd        string
+	CurrentDate             string
+	CurrentIntervalText     string
 }
 
 func adminHandler(db *sql.DB) http.HandlerFunc {
@@ -921,6 +1285,12 @@ func adminHandler(db *sql.DB) http.HandlerFunc {
 			http.Error(w, "internal error", http.StatusInternalServerError)
 			return
 		}
+		latestReport, latestReportErr := storage.GetLatestReport(db, storage.ReportTypeWeeklyReport)
+		if latestReportErr != nil && latestReportErr != sql.ErrNoRows {
+			slog.Error("adminHandler: latest weekly report", "err", latestReportErr)
+			http.Error(w, "internal error", http.StatusInternalServerError)
+			return
+		}
 
 		workouts, err := storage.ListWorkoutsWithMetrics(db, from, to, 200)
 		if err != nil {
@@ -934,12 +1304,41 @@ func adminHandler(db *sql.DB) http.HandlerFunc {
 			tab = "actions"
 		}
 
+		inferredBlockStart := ""
+		previousBlockStart := ""
+		previousBlockEnd := ""
+		currentDate := time.Now().Format("2006-01-02")
+		currentIntervalText := "Current interval: —"
+		if latestReportErr == nil {
+			previousBlockStart = latestReport.WeekStart.Format("2006-01-02")
+			previousBlockEnd = latestReport.WeekEnd.Format("2006-01-02")
+			inferredBlockStart = latestReport.WeekEnd.AddDate(0, 0, 1).Format("2006-01-02")
+			startDate, err := time.Parse("2006-01-02", inferredBlockStart)
+			if err == nil {
+				todayDate, err := time.Parse("2006-01-02", currentDate)
+				if err == nil {
+					days := int(todayDate.Sub(startDate).Hours()/24) + 1
+					if days > 0 {
+						currentIntervalText = fmt.Sprintf("Current interval: %d days starting on %s till today (%s)", days, inferredBlockStart, currentDate)
+					} else {
+						currentIntervalText = "Current interval: invalid date range"
+					}
+				}
+			}
+		}
+
 		data := adminPageData{
-			Reports:    reports,
-			Workouts:   workouts,
-			FilterFrom: filterFrom,
-			FilterTo:   filterTo,
-			ActiveTab:  tab,
+			Reports:                 reports,
+			Workouts:                workouts,
+			FilterFrom:              filterFrom,
+			FilterTo:                filterTo,
+			ActiveTab:               tab,
+			HasPreviousClosedReport: latestReportErr == nil,
+			InferredBlockStart:      inferredBlockStart,
+			PreviousBlockStart:      previousBlockStart,
+			PreviousBlockEnd:        previousBlockEnd,
+			CurrentDate:             currentDate,
+			CurrentIntervalText:     currentIntervalText,
 		}
 
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")

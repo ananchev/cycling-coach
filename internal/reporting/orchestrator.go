@@ -3,6 +3,7 @@ package reporting
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"log/slog"
 	"time"
@@ -16,6 +17,16 @@ type Orchestrator struct {
 	db          *sql.DB
 	profilePath string
 	provider    Provider
+}
+
+// CloseBlockResult is the combined output of closing a completed block and generating the next plan.
+type CloseBlockResult struct {
+	ReportID   int64
+	PlanID     int64
+	BlockStart time.Time
+	BlockEnd   time.Time
+	PlanStart  time.Time
+	PlanEnd    time.Time
 }
 
 // NewOrchestrator creates an Orchestrator with the given dependencies.
@@ -49,6 +60,8 @@ func (o *Orchestrator) Generate(ctx context.Context, reportType storage.ReportTy
 		return 0, fmt.Errorf("reporting.Orchestrator.Generate: assemble: %w", err)
 	}
 	input.UserPrompt = userPrompt
+	systemPrompt := input.AthleteProfile
+	userPromptText := BuildPrompt(input)
 
 	slog.Info("reporting: assembled input", "rides", len(input.Rides), "notes", len(input.Notes))
 
@@ -67,6 +80,8 @@ func (o *Orchestrator) Generate(ctx context.Context, reportType storage.ReportTy
 		WeekStart:     weekStart,
 		WeekEnd:       weekEnd,
 		SummaryText:   &output.Summary,
+		SystemPrompt:  systemPrompt,
+		UserPrompt:    userPromptText,
 		NarrativeText: &output.Narrative,
 		FullHTML:      &html,
 	}
@@ -78,4 +93,54 @@ func (o *Orchestrator) Generate(ctx context.Context, reportType storage.ReportTy
 
 	slog.Info("reporting: report persisted", "id", id, "type", string(reportType))
 	return id, nil
+}
+
+// GenerateCloseBlock closes the current training block and immediately creates the next 7-day plan.
+// The closed block starts on the day after the latest weekly report's end date.
+// On first use, when no prior weekly report exists, initialBlockStart must be provided.
+func (o *Orchestrator) GenerateCloseBlock(ctx context.Context, blockEnd time.Time, initialBlockStart *time.Time, userPrompt string) (*CloseBlockResult, error) {
+	lastClosed, err := storage.GetLatestReport(o.db, storage.ReportTypeWeeklyReport)
+	var blockStart time.Time
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			if initialBlockStart == nil || initialBlockStart.IsZero() {
+				return nil, fmt.Errorf("reporting.Orchestrator.GenerateCloseBlock: no prior weekly report exists; provide an initial block start for the first close-block run")
+			}
+			blockStart = dateOnly(*initialBlockStart)
+		} else {
+			return nil, fmt.Errorf("reporting.Orchestrator.GenerateCloseBlock: latest weekly report: %w", err)
+		}
+	} else {
+		blockStart = dateOnly(lastClosed.WeekEnd).AddDate(0, 0, 1)
+	}
+
+	blockEnd = dateOnly(blockEnd)
+	if blockEnd.Before(blockStart) {
+		return nil, fmt.Errorf("reporting.Orchestrator.GenerateCloseBlock: block end %s is before inferred block start %s", blockEnd.Format("2006-01-02"), blockStart.Format("2006-01-02"))
+	}
+
+	reportID, err := o.Generate(ctx, storage.ReportTypeWeeklyReport, blockStart, blockEnd, "")
+	if err != nil {
+		return nil, fmt.Errorf("reporting.Orchestrator.GenerateCloseBlock: weekly report: %w", err)
+	}
+
+	planStart := blockEnd.AddDate(0, 0, 1)
+	planEnd := planStart.AddDate(0, 0, 6)
+	planID, err := o.Generate(ctx, storage.ReportTypeWeeklyPlan, planStart, planEnd, userPrompt)
+	if err != nil {
+		return nil, fmt.Errorf("reporting.Orchestrator.GenerateCloseBlock: weekly plan: %w", err)
+	}
+
+	return &CloseBlockResult{
+		ReportID:   reportID,
+		PlanID:     planID,
+		BlockStart: blockStart,
+		BlockEnd:   blockEnd,
+		PlanStart:  planStart,
+		PlanEnd:    planEnd,
+	}, nil
+}
+
+func dateOnly(t time.Time) time.Time {
+	return time.Date(t.Year(), t.Month(), t.Day(), 0, 0, 0, 0, t.Location())
 }

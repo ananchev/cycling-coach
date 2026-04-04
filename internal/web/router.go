@@ -39,9 +39,13 @@ func NewRouter(cfg *config.Config, db *sql.DB, auth *wahoo.AuthHandler, syncer *
 	r.Post("/api/workout/reset-fit", resetFITHandler(proc))
 	r.Post("/api/workout/ignore", ignoreFITHandler(db))
 	r.Post("/api/report", reportHandler(orch))
+	r.Post("/api/report/close-block", closeBlockReportHandler(orch))
 	r.Post("/api/report/send", sendReportHandler(delivery))
 	r.Delete("/api/report/{id}", deleteReportHandler(db))
+	r.Get("/api/report/{id}/prompts", reportPromptsHandler(db))
 	r.Post("/api/profile/evolve", evolveProfileHandler(orch))
+	r.Get("/api/progress", progressHandler(db))
+	r.Post("/api/progress/interpret", progressInterpretHandler(orch))
 	r.Get("/api/workouts/{id}/data", workoutDataHandler(db))
 	r.Get("/api/workouts/{id}/timeseries.csv", workoutTimeSeriesHandler(db))
 

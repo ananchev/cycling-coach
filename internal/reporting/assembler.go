@@ -117,22 +117,27 @@ func BuildPrompt(input *ReportInput) string {
 	isReport := input.Type == storage.ReportTypeWeeklyReport
 
 	if isReport {
-		fmt.Fprintf(&b, "Generate a weekly training report for the week of %s to %s.\n\n",
+		fmt.Fprintf(&b, "Generate a training report for the period from %s to %s.\n\n",
 			input.WeekStart.Format("2006-01-02"),
 			input.WeekEnd.Format("2006-01-02"),
 		)
-		b.WriteString("Analyse what actually happened this week. Where the athlete followed the plan, confirm it. Where they deviated, explain the implications. Highlight key metrics (HR drift/decoupling, TSS, power trends).\n\n")
+		b.WriteString("Analyse what actually happened in this period. Where the athlete followed the plan, confirm it. Where they deviated, explain the implications. Highlight key metrics (HR drift/decoupling, TSS, power trends).\n\n")
 	} else {
-		fmt.Fprintf(&b, "Generate a weekly training plan for the week of %s to %s.\n\n",
+		fmt.Fprintf(&b, "Generate a training plan for the period from %s to %s.\n\n",
 			input.WeekStart.Format("2006-01-02"),
 			input.WeekEnd.Format("2006-01-02"),
 		)
 		b.WriteString("Based on the athlete profile and recent training load, prescribe specific sessions for each day. Include target zones, duration, and the coaching rationale for each session.\n\n")
 	}
 
-	b.WriteString("## Rides this week\n\n")
+	b.WriteString("## Exact calendar for this period\n\n")
+	b.WriteString("Use the exact weekday/date mappings below when naming days in the output. Do not infer or rename weekdays separately from these dates.\n\n")
+	b.WriteString(formatPeriodCalendar(input.WeekStart, input.WeekEnd))
+	b.WriteString("\n")
+
+	b.WriteString("## Rides in this period\n\n")
 	if len(input.Rides) == 0 {
-		b.WriteString("No rides recorded this week.\n\n")
+		b.WriteString("No rides recorded in this period.\n\n")
 	} else {
 		b.WriteString("Date       | Type            | Dur(min) | AvgP(W) | NP(W) | IF   | AvgHR | Drift% | TSS\n")
 		b.WriteString("-----------|-----------------|----------|---------|-------|------|-------|--------|-----\n")
@@ -208,17 +213,20 @@ func BuildPrompt(input *ReportInput) string {
 	}
 
 	if !isReport && input.UserPrompt != "" {
-		b.WriteString("## Athlete constraints / notes for this week\n\n")
+		b.WriteString("## Athlete constraints / notes for this period\n\n")
 		b.WriteString(input.UserPrompt)
 		b.WriteString("\n\n")
 		b.WriteString("Take these constraints into account when building the plan.\n\n")
 	}
 
 	if isReport && input.PriorPlanNarrative != "" {
-		b.WriteString("## Training plan for this week (what was prescribed)\n\n")
+		b.WriteString("## Training plan for this period (what was prescribed)\n\n")
 		b.WriteString(input.PriorPlanNarrative)
 		b.WriteString("\n\n")
 		b.WriteString("Compare actual execution against this plan. Note compliance, deviations, and their likely causes.\n\n")
+		if reportExtendsBeyondPlannedWeek(input) {
+			b.WriteString("The actual execution window extends beyond the original planned 7-day block. Treat the extra days as a continuation after the planned week ended: explain how execution drifted beyond the original window, assess what that means for fatigue and progression, and use that extended reality when framing the next period.\n\n")
+		}
 	}
 
 	b.WriteString(`## Output format
@@ -238,6 +246,37 @@ func derefFloat(v *float64) float64 {
 		return 0
 	}
 	return *v
+}
+
+func reportExtendsBeyondPlannedWeek(input *ReportInput) bool {
+	if input == nil {
+		return false
+	}
+	plannedEnd := input.WeekStart.AddDate(0, 0, 6)
+	for _, r := range input.Rides {
+		if r.Date.After(plannedEnd) {
+			return true
+		}
+	}
+	for _, n := range input.Notes {
+		if n.Timestamp.After(plannedEnd) {
+			return true
+		}
+	}
+	return false
+}
+
+func formatPeriodCalendar(start, end time.Time) string {
+	start = time.Date(start.Year(), start.Month(), start.Day(), 0, 0, 0, 0, start.Location())
+	end = time.Date(end.Year(), end.Month(), end.Day(), 0, 0, 0, 0, end.Location())
+	if end.Before(start) {
+		return ""
+	}
+	var b strings.Builder
+	for d := start; !d.After(end); d = d.AddDate(0, 0, 1) {
+		fmt.Fprintf(&b, "- %s = %s\n", d.Format("2006-01-02"), d.Format("Monday, January 2, 2006"))
+	}
+	return b.String()
 }
 
 // formatZoneTimeline converts the JSON zone timeline into a human-readable block.

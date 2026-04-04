@@ -211,8 +211,22 @@ var migrations = []string{
 		week_start   DATE NOT NULL,
 		week_end     DATE NOT NULL,
 		summary_text TEXT,
+		system_prompt TEXT NOT NULL DEFAULT '',
+		user_prompt   TEXT NOT NULL DEFAULT '',
 		full_html    TEXT,
 		created_at   DATETIME DEFAULT CURRENT_TIMESTAMP
+	)`,
+
+	`CREATE TABLE IF NOT EXISTS progress_analyses (
+		id             INTEGER PRIMARY KEY CHECK(id = 1),
+		period_from    DATE NOT NULL,
+		period_to      DATE NOT NULL,
+		snapshot_json  TEXT NOT NULL,
+		system_prompt  TEXT NOT NULL DEFAULT '',
+		user_prompt    TEXT NOT NULL DEFAULT '',
+		narrative_text TEXT NOT NULL,
+		created_at     DATETIME DEFAULT CURRENT_TIMESTAMP,
+		updated_at     DATETIME DEFAULT CURRENT_TIMESTAMP
 	)`,
 
 	// Indexes for common query patterns.
@@ -221,6 +235,7 @@ var migrations = []string{
 	`CREATE INDEX IF NOT EXISTS idx_notes_timestamp     ON athlete_notes(timestamp)`,
 	`CREATE INDEX IF NOT EXISTS idx_notes_workout_id    ON athlete_notes(workout_id)`,
 	`CREATE INDEX IF NOT EXISTS idx_reports_week_start  ON reports(week_start)`,
+	`CREATE INDEX IF NOT EXISTS idx_progress_period_from ON progress_analyses(period_from)`,
 
 	// Unique constraint on reports(type, week_start) required for ON CONFLICT upserts.
 	`CREATE UNIQUE INDEX IF NOT EXISTS idx_reports_type_week ON reports(type, week_start)`,
@@ -244,6 +259,10 @@ var migrations = []string{
 
 	// Migration: add narrative_text column to reports for full plan comparison.
 	`ALTER TABLE reports ADD COLUMN narrative_text TEXT`,
+	`ALTER TABLE reports ADD COLUMN system_prompt TEXT NOT NULL DEFAULT ''`,
+	`ALTER TABLE reports ADD COLUMN user_prompt TEXT NOT NULL DEFAULT ''`,
+	`ALTER TABLE progress_analyses ADD COLUMN system_prompt TEXT NOT NULL DEFAULT ''`,
+	`ALTER TABLE progress_analyses ADD COLUMN user_prompt TEXT NOT NULL DEFAULT ''`,
 
 	// Workout types reference table (Wahoo master data).
 	`CREATE TABLE IF NOT EXISTS workout_types (

@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -130,6 +131,63 @@ func reportHandler(orch *reporting.Orchestrator) http.HandlerFunc {
 
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(map[string]int64{"id": id}) //nolint:errcheck
+	}
+}
+
+// closeBlockReportHandler closes the current block and immediately creates the next weekly plan.
+// Request body: {"block_end":"2026-03-29","user_prompt":"optional clarification for the next plan"}
+func closeBlockReportHandler(orch *reporting.Orchestrator) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		var req struct {
+			BlockEnd          string `json:"block_end"`
+			InitialBlockStart string `json:"initial_block_start"`
+			UserPrompt        string `json:"user_prompt"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, "invalid JSON: "+err.Error(), http.StatusBadRequest)
+			return
+		}
+		if req.BlockEnd == "" {
+			http.Error(w, "block_end must be YYYY-MM-DD", http.StatusBadRequest)
+			return
+		}
+
+		blockEnd, err := time.Parse("2006-01-02", req.BlockEnd)
+		if err != nil {
+			http.Error(w, "block_end must be YYYY-MM-DD: "+err.Error(), http.StatusBadRequest)
+			return
+		}
+
+		var initialBlockStart *time.Time
+		if req.InitialBlockStart != "" {
+			t, err := time.Parse("2006-01-02", req.InitialBlockStart)
+			if err != nil {
+				http.Error(w, "initial_block_start must be YYYY-MM-DD: "+err.Error(), http.StatusBadRequest)
+				return
+			}
+			initialBlockStart = &t
+		}
+
+		result, err := orch.GenerateCloseBlock(r.Context(), blockEnd, initialBlockStart, req.UserPrompt)
+		if err != nil {
+			slog.Error("close block generation failed", "err", err)
+			status := http.StatusInternalServerError
+			if strings.Contains(err.Error(), "no prior weekly report exists") || strings.Contains(err.Error(), "is before inferred block start") {
+				status = http.StatusBadRequest
+			}
+			http.Error(w, "close block generation failed: "+err.Error(), status)
+			return
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]any{ //nolint:errcheck
+			"report_id":   result.ReportID,
+			"plan_id":     result.PlanID,
+			"block_start": result.BlockStart.Format("2006-01-02"),
+			"block_end":   result.BlockEnd.Format("2006-01-02"),
+			"plan_start":  result.PlanStart.Format("2006-01-02"),
+			"plan_end":    result.PlanEnd.Format("2006-01-02"),
+		})
 	}
 }
 
@@ -287,6 +345,39 @@ func deleteReportHandler(db *sql.DB) http.HandlerFunc {
 		}
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(map[string]string{"status": "deleted"}) //nolint:errcheck
+	}
+}
+
+// reportPromptsHandler returns the saved system/user prompts for a generated report or plan.
+// GET /api/report/{id}/prompts
+func reportPromptsHandler(db *sql.DB) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		idStr := chi.URLParam(r, "id")
+		id, err := strconv.ParseInt(idStr, 10, 64)
+		if err != nil || id <= 0 {
+			http.Error(w, "invalid report id", http.StatusBadRequest)
+			return
+		}
+
+		rep, err := storage.GetReportByID(db, id)
+		if err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				http.Error(w, "report not found", http.StatusNotFound)
+				return
+			}
+			slog.Error("report prompts failed", "report_id", id, "err", err)
+			http.Error(w, "internal error", http.StatusInternalServerError)
+			return
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]any{ //nolint:errcheck
+			"id":            rep.ID,
+			"type":          rep.Type,
+			"week_start":    rep.WeekStart.Format("2006-01-02"),
+			"system_prompt": rep.SystemPrompt,
+			"user_prompt":   rep.UserPrompt,
+		})
 	}
 }
 

@@ -1,6 +1,6 @@
 # cycling-coach
 
-Personal cycling training assistant. It ingests workouts from Wahoo, stores subjective notes from Telegram and the admin UI, computes ride metrics from FIT files, generates weekly reports and plans with Claude, and can deliver summaries through Telegram.
+Personal cycling training assistant. It ingests workouts from Wahoo, stores subjective notes from Telegram and the admin UI, computes ride metrics from FIT files, generates report/plan periods with Claude, and can deliver summaries through Telegram.
 
 This is my first vibe-coded app. The implementation was still reviewed carefully for architecture decisions, code patterns, and runtime behavior, but the project started from that workflow and keeps that spirit.
 
@@ -8,30 +8,29 @@ This file describes the implementation that exists in the repository today. When
 
 ## Core Coaching Loop
 
-The intended use of the app is an AI-assisted weekly coaching cycle:
+The intended use of the app is an AI-assisted coaching cycle built around closed training blocks:
 
 0. Maintain an athlete profile that describes the athlete, constraints, zones, training history, and coaching instructions
-1. Generate a weekly plan with Claude before the week starts
-2. Execute the week and let workouts arrive from Wahoo
+1. Execute the current training block and let workouts arrive from Wahoo
 3. Add notes and body metrics to explain what happened in real life
-4. Generate the weekly report so Claude can analyze compliance, workout quality, fatigue signals, and trends
-5. Use that report as context for the next weekly plan
+4. Close the block and generate the report so Claude can analyze compliance, workout quality, fatigue signals, and trends
+5. Generate the next 7-day plan from that fresh report context plus any clarification notes
 
-That plan -> execution -> report -> next plan loop is the main feature of the app.
+That execution -> report -> next plan loop is the main feature of the app.
 
 The athlete profile is the base context for this loop. It is stored as markdown, sent to Claude during report and plan generation, and acts as the long-lived coaching memory for the app. It describes things like goals, constraints, zone interpretation, training philosophy, warning flags, and current phase.
 
-The profile can evolve over time. The app includes an "Evolve Profile" flow that uses recent weekly reports to refresh the training-history and current-phase sections while preserving the protected coaching structure.
+The profile can evolve over time. The app includes an "Evolve Profile" flow that uses recent reports to refresh the training-history and current-phase sections while preserving the protected coaching structure.
 
 ```mermaid
 flowchart LR
-    P[Athlete Profile] --> W[Weekly Plan with Claude]
-    W --> E[Execute Training Week]
+    P[Athlete Profile] --> E[Execute Training Block]
     E --> N[Workouts, Notes, Body Metrics]
-    N --> R[Weekly Report with Claude]
+    N --> R[Training Report with Claude]
     R --> U[Evolve Profile / Update Context]
     U --> P
-    R --> W
+    R --> W[Next Training Plan with Claude]
+    W --> E
 ```
 
 ## User-Facing Flows
@@ -56,11 +55,11 @@ flowchart LR
 - Keep the athlete profile current so Claude has the right long-term context
 - If no workout exists by 23:50 local time, the app creates a placeholder day entry so the timeline stays complete
 
-### 4. Generate weekly outputs
+### 4. Close blocks and generate outputs
 
-- Create a weekly plan before the week starts
-- Execute the week and capture notes/context as needed
-- Create a weekly report for the completed week
+- Close the completed block from the admin UI
+- Let the app generate the finished-block report and the next 7-day plan together
+- Use the optional clarification prompt to explain travel, fatigue, schedule drift, or constraints for the next block
 - Review rendered HTML in the browser
 - Optionally send the summary and link to Telegram
 
@@ -70,7 +69,7 @@ flowchart LR
 2. Workouts arrive through the Wahoo webhook and optional manual/scheduled sync.
 3. Workout rows are stored in SQLite and FIT files are downloaded to disk when available.
 4. FIT processing computes per-ride metrics such as NP, IF, TSS, TRIMP, HR drift, decoupling, zone distribution, and a power-zone timeline.
-5. Weekly reports and plans are assembled from workouts, computed metrics, notes, and the athlete profile markdown.
+5. Training reports and plans are assembled from workouts, computed metrics, notes, and the athlete profile markdown.
 6. Claude returns structured JSON with a Telegram-sized summary plus a full narrative.
 7. The app renders HTML, stores it in the database, serves it at `/reports/{id}` or `/plans/{id}`, and can send the summary + link to Telegram.
 
@@ -94,18 +93,27 @@ flowchart LR
 
 ### Reporting
 
-- Weekly plan first workflow
-- Weekly report generation
-- Weekly plan generation
-- Claude analysis of completed weeks using workouts, metrics, notes, and athlete profile context
+- Closed-block report generation
+- Next-plan generation from the freshly closed block
+- Standalone report/plan generation capability still exists in the backend, but the admin UI now centers the combined close-block workflow
+- Claude analysis of completed periods using workouts, metrics, notes, and athlete profile context
 - HTML rendering stored in `reports.full_html`
+- Saved system/user prompts for generated reports, plans, and progress interpretations
 - Telegram delivery with persisted delivery state and retry support
-- Athlete profile evolution from recent weekly reports
+- Athlete profile evolution from recent reports
+
+### Progress
+
+- Progress page in the admin UI with date-filtered KPI cards and trend arrows
+- KPIs include aerobic efficiency, decoupling, TSS, TRIMP, average IF, completion rate, calories, and conditional weight comparison
+- Selected-period vs prior-period comparison
+- Single saved AI interpretation for a chosen `from -> today` window
+- Saved system/user prompts for that interpretation, viewable from the UI
 
 ### Athlete Profile
 
 - Markdown-based long-lived coaching context
-- Used as base prompt context for both weekly plans and weekly reports
+- Used as base prompt context for both plans and reports
 - Stored outside the database as a runtime file at `ATHLETE_PROFILE_PATH`
 - Bootstrapped from `config/athlete-profile.default.md` on first startup
 - Can be updated manually or evolved from recent reports through the admin UI
@@ -121,10 +129,11 @@ flowchart LR
 
 - Admin UI at `/admin`
 - Health endpoint at `/health`
-- APIs for sync, processing, report generation, report sending, report deletion, note management, body metrics, log streaming, and profile evolution
+- APIs for sync, processing, close-block generation, report generation, report sending, report deletion, note management, progress, body metrics, log streaming, and profile evolution
 - SSE log stream at `/api/logs/stream`
 - Workout admin actions for note state, summary-row preview, per-ride zone preview, and FIT time-series download
 - Body-metrics charts with date-range filtering
+- Reports & Plans table ordered in the natural workflow sequence: closed report first, then the following plan
 
 ## Current Routes
 
@@ -148,9 +157,13 @@ flowchart LR
 - `POST /api/workout/reset-fit`
 - `POST /api/workout/ignore`
 - `POST /api/report`
+- `POST /api/report/close-block`
 - `POST /api/report/send`
 - `DELETE /api/report/{id}`
+- `GET /api/report/{id}/prompts`
 - `POST /api/profile/evolve`
+- `GET /api/progress`
+- `POST /api/progress/interpret`
 - `GET /api/body-metrics`
 - `POST /api/notes`
 - `GET /api/notes`
@@ -234,12 +247,12 @@ From there you can:
 - inspect the per-ride zone detail sent to Claude
 - download FIT time-series CSV data
 - trigger sync and FIT processing
-- generate weekly reports and plans
+- close the current block and generate the finished-block report plus the next 7-day plan
 - send reports through Telegram
 - inspect logs live through SSE-backed log streaming
 - review body metrics with date filtering
+- review progress KPIs and save an AI-generated trend interpretation
 - review and evolve the athlete profile
-- evolve the athlete profile
 
 The backend HTTP endpoints still exist and are useful for automation or debugging, but they are secondary to the admin UI for day-to-day use.
 
@@ -286,8 +299,8 @@ Then:
 
 ### Reports and Plans
 
-- Generate weekly plans from the current athlete profile and recent context
-- Generate weekly reports that compare completed training against intent and actual outcomes
+- Generate plans from the current athlete profile and recent context
+- Generate reports that compare completed training against intent and actual outcomes
 - Open rendered HTML pages in the browser
 - Send generated outputs to Telegram when delivery is configured
 
@@ -342,18 +355,18 @@ curl -X POST http://localhost:8080/api/process \
   -d '{"reprocess_all":true}'
 ```
 
-### Generate a weekly report or plan
+### Generate a report or plan directly
 
 ```bash
 curl -X POST http://localhost:8080/api/report \
   -H 'Content-Type: application/json' \
-  -d '{"type":"weekly_report","week_start":"2026-03-23"}'
+  -d '{"type":"weekly_report","week_start":"2026-03-23","week_end":"2026-04-04"}'
 ```
 
 ```bash
 curl -X POST http://localhost:8080/api/report \
   -H 'Content-Type: application/json' \
-  -d '{"type":"weekly_plan","week_start":"2026-03-30","user_prompt":"Travelling Tuesday, keep Wednesday short"}'
+  -d '{"type":"weekly_plan","week_start":"2026-04-05","week_end":"2026-04-11","user_prompt":"Travelling Tuesday, keep Wednesday short"}'
 ```
 
 ### Send a generated report

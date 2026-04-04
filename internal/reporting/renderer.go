@@ -23,7 +23,7 @@ var reportTemplate = template.Must(template.New("report").Parse(`<!DOCTYPE html>
     .report{max-width:800px;margin:0 auto;background:#fff;border:1px solid #ddd;border-radius:8px;padding:32px}
     header{margin-bottom:24px;border-bottom:2px solid #e5e7eb;padding-bottom:16px}
     h1{font-size:1.5rem;margin-bottom:6px}
-    .week{color:#666;font-size:.9rem}
+    .period{color:#666;font-size:.9rem}
     .summary{background:#f0f9ff;border-left:4px solid #2563eb;padding:16px 20px;border-radius:4px;margin-bottom:24px}
     .summary h2{font-size:.85rem;text-transform:uppercase;letter-spacing:.05em;color:#2563eb;margin-bottom:8px}
     .summary pre{white-space:pre-wrap;word-wrap:break-word;font-family:inherit;font-size:.95rem;line-height:1.6}
@@ -48,7 +48,7 @@ var reportTemplate = template.Must(template.New("report").Parse(`<!DOCTYPE html>
   <article class="report">
     <header>
       <h1>{{.Title}}</h1>
-      <p class="week">Week of {{.WeekRange}}</p>
+      <p class="period">Period: {{.PeriodRange}}</p>
     </header>
     <section class="summary">
       <h2>Coaching Summary</h2>
@@ -64,7 +64,7 @@ var reportTemplate = template.Must(template.New("report").Parse(`<!DOCTYPE html>
 
 type reportTemplateData struct {
 	Title         string
-	WeekRange     string
+	PeriodRange   string
 	Summary       string
 	NarrativeHTML template.HTML
 }
@@ -73,9 +73,9 @@ type reportTemplateData struct {
 // narrative is treated as pre-formatted markdown-like text rendered inside a <pre> block
 // until a proper markdown renderer is wired in a later phase.
 func RenderHTML(reportType storage.ReportType, weekStart, weekEnd time.Time, output *ReportOutput) (string, error) {
-	title := "Weekly Report"
+	title := "Training Report"
 	if reportType == storage.ReportTypeWeeklyPlan {
-		title = "Weekly Training Plan"
+		title = "Training Plan"
 	}
 
 	weekRange := fmt.Sprintf("%s – %s",
@@ -87,7 +87,7 @@ func RenderHTML(reportType storage.ReportType, weekStart, weekEnd time.Time, out
 
 	data := reportTemplateData{
 		Title:         title,
-		WeekRange:     weekRange,
+		PeriodRange:   weekRange,
 		Summary:       output.Summary,
 		NarrativeHTML: narrativeHTML,
 	}
@@ -165,6 +165,12 @@ func markdownToHTML(md string) string {
 	}
 	flush()
 	return out.String()
+}
+
+// RenderMarkdownFragment converts markdown-like coaching text into safe HTML
+// fragments for inline admin rendering.
+func RenderMarkdownFragment(md string) string {
+	return markdownToHTML(md)
 }
 
 // inlineMarkdown handles **bold**, *italic*, and `code` within a single line.

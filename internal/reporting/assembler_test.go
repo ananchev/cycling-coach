@@ -143,7 +143,7 @@ func TestBuildPrompt_ContainsKeyFields(t *testing.T) {
 
 	checks := []string{
 		"2026-03-09",
-		"weekly training report",
+		"training report for the period",
 		"cycling",
 		"60",  // duration
 		"230", // power
@@ -178,7 +178,40 @@ func TestBuildPrompt_WeeklyPlan(t *testing.T) {
 		WeekEnd:   weekStart.Add(7 * 24 * time.Hour),
 	}
 	prompt := reporting.BuildPrompt(input)
-	if !strings.Contains(prompt, "weekly training plan") {
-		t.Errorf("prompt should reference 'weekly training plan'; got:\n%s", prompt)
+	if !strings.Contains(prompt, "training plan for the period") {
+		t.Errorf("prompt should reference 'training plan for the period'; got:\n%s", prompt)
+	}
+	for _, want := range []string{
+		"## Exact calendar for this period",
+		"Use the exact weekday/date mappings below",
+		"2026-03-16 = Monday, March 16, 2026",
+		"2026-03-22 = Sunday, March 22, 2026",
+	} {
+		if !strings.Contains(prompt, want) {
+			t.Errorf("prompt missing %q", want)
+		}
+	}
+}
+
+func TestBuildPrompt_ReportExtendedBeyondPlannedWeek(t *testing.T) {
+	weekStart := time.Date(2026, 3, 9, 0, 0, 0, 0, time.UTC)
+	weekEnd := time.Date(2026, 3, 18, 0, 0, 0, 0, time.UTC)
+	noteText := "Kept training after the planned week."
+	input := &reporting.ReportInput{
+		Type:               storage.ReportTypeWeeklyReport,
+		WeekStart:          weekStart,
+		WeekEnd:            weekEnd,
+		PriorPlanNarrative: "# Weekly plan\n\nMonday easy, Tuesday intervals.",
+		Rides: []reporting.RideSummary{
+			{Date: weekStart.AddDate(0, 0, 8), WorkoutType: "cycling"},
+		},
+		Notes: []reporting.NoteSummary{
+			{Timestamp: weekStart.AddDate(0, 0, 8), Type: storage.NoteTypeNote, Text: &noteText},
+		},
+	}
+
+	prompt := reporting.BuildPrompt(input)
+	if !strings.Contains(prompt, "actual execution window extends beyond the original planned 7-day block") {
+		t.Errorf("prompt should mention extended execution window; got:\n%s", prompt)
 	}
 }
