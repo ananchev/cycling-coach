@@ -67,6 +67,7 @@ Wahoo OAuth + API + webhook
 - opens SQLite
 - applies schema migrations on startup
 - owns CRUD helpers for tokens, workouts, metrics, notes, reports, deliveries, and athlete config
+- owns placeholder-workout reconciliation for no-training days
 
 ### `internal/wahoo`
 
@@ -75,6 +76,7 @@ Wahoo OAuth + API + webhook
 - lists workouts through the Wahoo API
 - downloads FIT files
 - ingests workouts via sync or webhook
+- uses separate payload mapping for the polling API shape and the documented webhook shape
 
 ### `internal/fit`
 
@@ -96,6 +98,7 @@ Wahoo OAuth + API + webhook
 - stores generated reports
 - sends Telegram deliveries
 - evolves the athlete profile from recent report history
+- formats admin-only workout summary/zone-detail previews
 
 ### `internal/telegram`
 
@@ -110,10 +113,12 @@ Wahoo OAuth + API + webhook
 - exposes the admin page and JSON APIs
 - serves stored report HTML
 - provides request logging, recovery, and live log streaming
+- serves workout data preview and FIT time-series download endpoints
 
 ### `internal/scheduler`
 
 - registers cron jobs only when env vars are present
+- always registers a fixed daily placeholder-workout job at 23:50 Europe/Amsterdam
 - runs Wahoo sync
 - runs FIT processing
 - runs weekly report/plan generation and then delivery
@@ -128,12 +133,18 @@ Wahoo OAuth + API + webhook
 - webhook ingestion via `/wahoo/webhook`
 - idempotent workout insert keyed by `wahoo_id`
 - optional FIT download when the workout payload contains a file URL
+- webhook-specific mapping from:
+  - `workout_summary.workout.id`
+  - `workout_summary.workout.starts`
+  - `workout_summary.workout.workout_type_id`
+  - `workout_summary.file.url`
 
 ### Workout analysis
 
 - parses FIT files from disk
 - marks workouts with missing FIT files as processed without metrics
 - leaves corrupt FIT files unprocessed so they can be reset and retried
+- can export parsed FIT record streams as CSV through the admin/API layer
 - computes:
   - duration
   - average/max HR
@@ -169,8 +180,17 @@ Wahoo OAuth + API + webhook
 ### Admin and operations
 
 - admin UI at `/admin`
-- JSON endpoints for sync, process, report generation, delivery, note editing, body metrics, and log streaming
+- JSON endpoints for sync, process, report generation, delivery, note creation/editing, body metrics, workout data preview, FIT CSV download, and log streaming
 - report/plan HTML served directly from the database
+- body metrics support date filtering in the UI and backend
+- workout rows expose note-state icons plus summary/zone/timeseries actions
+
+### Placeholder workout behavior
+
+- at 23:50 Europe/Amsterdam, the scheduler creates a manual placeholder workout for the day if no workout exists yet
+- placeholder workouts are marked processed immediately and do not expect FIT files
+- notes can be attached to the placeholder day
+- if a real Wahoo workout later arrives for that same day, the placeholder is deleted and its notes are moved to the real workout
 
 ## 5. Current Data Model
 
@@ -210,6 +230,7 @@ Behavior:
 - no cron string means that job is not registered
 - if all are empty, the scheduler starts with no jobs
 - all jobs use the `Europe/Amsterdam` timezone
+- one additional fixed job always exists: `23:50` daily placeholder workout creation
 
 ## 7. Athlete Profile Behavior
 
@@ -253,6 +274,9 @@ Current limitation:
 - `DELETE /api/report/{id}`
 - `POST /api/profile/evolve`
 - `GET /api/body-metrics`
+- `GET /api/workouts/{id}/data`
+- `GET /api/workouts/{id}/timeseries.csv`
+- `POST /api/notes`
 - `GET /api/notes`
 - `PUT /api/notes/{id}`
 - `DELETE /api/notes/{id}`
@@ -277,6 +301,13 @@ Older design-doc commands such as `/status`, `/week`, and `/plan` do not exist i
 ## 10. Rendering Path
 
 The active report rendering path is [`internal/reporting/renderer.go`](/Users/ananchev/Development/cycling-coach/internal/reporting/renderer.go), which renders HTML from an inline Go template.
+
+The admin UI also has a separate display-only formatting path in [`internal/reporting/ride_view.go`](/Users/ananchev/Development/cycling-coach/internal/reporting/ride_view.go) for:
+
+- workout summary-row preview
+- per-ride zone-detail preview
+
+That path is for admin inspection only and does not alter the main Claude prompt assembly.
 
 Inactive-but-present assets:
 

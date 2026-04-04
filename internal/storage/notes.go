@@ -114,13 +114,25 @@ func ListAllNotes(db *sql.DB, limit int) ([]AthleteNote, error) {
 }
 
 // ListBodyMetrics returns weight-type notes that have at least one body metric, ordered by timestamp ASC.
-func ListBodyMetrics(db *sql.DB, limit int) ([]AthleteNote, error) {
-	rows, err := db.Query(`
+// Zero from/to values mean no lower/upper bound.
+func ListBodyMetrics(db *sql.DB, from, to time.Time, limit int) ([]AthleteNote, error) {
+	query := `
 		SELECT id, timestamp, type, rpe, weight_kg, body_fat_pct, muscle_mass_kg, note, workout_id, created_at
 		FROM athlete_notes
-		WHERE type = 'weight' AND (weight_kg IS NOT NULL OR body_fat_pct IS NOT NULL OR muscle_mass_kg IS NOT NULL)
-		ORDER BY timestamp ASC
-		LIMIT ?`, limit)
+		WHERE type = 'weight' AND (weight_kg IS NOT NULL OR body_fat_pct IS NOT NULL OR muscle_mass_kg IS NOT NULL)`
+	args := []any{}
+	if !from.IsZero() {
+		query += " AND timestamp >= ?"
+		args = append(args, from)
+	}
+	if !to.IsZero() {
+		query += " AND timestamp <= ?"
+		args = append(args, to)
+	}
+	query += " ORDER BY timestamp ASC LIMIT ?"
+	args = append(args, limit)
+
+	rows, err := db.Query(query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("storage.ListBodyMetrics: %w", err)
 	}

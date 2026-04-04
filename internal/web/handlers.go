@@ -2,6 +2,7 @@ package web
 
 import (
 	"database/sql"
+	"encoding/csv"
 	"encoding/json"
 	"errors"
 	"log/slog"
@@ -13,6 +14,7 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"cycling-coach/internal/analysis"
+	fitpkg "cycling-coach/internal/fit"
 	"cycling-coach/internal/reporting"
 	"cycling-coach/internal/storage"
 	"cycling-coach/internal/wahoo"
@@ -369,7 +371,26 @@ func evolveProfileHandler(orch *reporting.Orchestrator) http.HandlerFunc {
 // GET /api/body-metrics
 func bodyMetricsHandler(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		notes, err := storage.ListBodyMetrics(db, 1000)
+		var from, to time.Time
+		if fromStr := r.URL.Query().Get("from"); fromStr != "" {
+			t, err := time.Parse("2006-01-02", fromStr)
+			if err != nil {
+				http.Error(w, "from must be YYYY-MM-DD", http.StatusBadRequest)
+				return
+			}
+			from = t
+		}
+		if toStr := r.URL.Query().Get("to"); toStr != "" {
+			t, err := time.Parse("2006-01-02", toStr)
+			if err != nil {
+				http.Error(w, "to must be YYYY-MM-DD", http.StatusBadRequest)
+				return
+			}
+			// Make the upper bound inclusive for the whole selected day.
+			to = t.Add(24*time.Hour - time.Nanosecond)
+		}
+
+		notes, err := storage.ListBodyMetrics(db, from, to, 1000)
 		if err != nil {
 			slog.Error("bodyMetricsHandler", "err", err)
 			http.Error(w, "internal error", http.StatusInternalServerError)
@@ -395,6 +416,67 @@ func bodyMetricsHandler(db *sql.DB) http.HandlerFunc {
 
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(out) //nolint:errcheck
+	}
+}
+
+// createNoteHandler creates a note, optionally linked to a workout.
+// POST /api/notes
+func createNoteHandler(db *sql.DB) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		var req struct {
+			Type         string   `json:"type"`
+			RPE          *int64   `json:"rpe"`
+			WeightKG     *float64 `json:"weight_kg"`
+			BodyFatPct   *float64 `json:"body_fat_pct"`
+			MuscleMassKG *float64 `json:"muscle_mass_kg"`
+			Note         *string  `json:"note"`
+			WorkoutID    *int64   `json:"workout_id"`
+			Timestamp    string   `json:"timestamp"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, "invalid JSON: "+err.Error(), http.StatusBadRequest)
+			return
+		}
+
+		noteType := storage.NoteType(req.Type)
+		if noteType != storage.NoteTypeRide && noteType != storage.NoteTypeNote && noteType != storage.NoteTypeWeight {
+			http.Error(w, "type must be ride, note, or weight", http.StatusBadRequest)
+			return
+		}
+
+		ts := time.Now()
+		if req.Timestamp != "" {
+			parsed, err := time.Parse(time.RFC3339, req.Timestamp)
+			if err != nil {
+				http.Error(w, "timestamp must be RFC3339", http.StatusBadRequest)
+				return
+			}
+			ts = parsed
+		} else if req.WorkoutID != nil {
+			workout, err := storage.GetWorkoutWithMetricsByID(db, *req.WorkoutID)
+			if err == nil {
+				ts = workout.StartedAt
+			}
+		}
+
+		id, err := storage.InsertNote(db, &storage.AthleteNote{
+			Timestamp:    ts,
+			Type:         noteType,
+			RPE:          req.RPE,
+			WeightKG:     req.WeightKG,
+			BodyFatPct:   req.BodyFatPct,
+			MuscleMassKG: req.MuscleMassKG,
+			Note:         req.Note,
+			WorkoutID:    req.WorkoutID,
+		})
+		if err != nil {
+			slog.Error("createNoteHandler", "err", err)
+			http.Error(w, "create failed: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]any{"status": "created", "id": id}) //nolint:errcheck
 	}
 }
 
@@ -536,6 +618,90 @@ func deleteNoteHandler(db *sql.DB) http.HandlerFunc {
 
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(map[string]string{"status": "deleted"}) //nolint:errcheck
+	}
+}
+
+// workoutDataHandler returns formatted per-workout data blocks for the admin UI.
+// GET /api/workouts/{id}/data
+func workoutDataHandler(db *sql.DB) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		idStr := chi.URLParam(r, "id")
+		id, err := strconv.ParseInt(idStr, 10, 64)
+		if err != nil || id <= 0 {
+			http.Error(w, "invalid workout id", http.StatusBadRequest)
+			return
+		}
+
+		workout, err := storage.GetWorkoutWithMetricsByID(db, id)
+		if err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				http.Error(w, "not found", http.StatusNotFound)
+				return
+			}
+			slog.Error("workoutDataHandler", "id", id, "err", err)
+			http.Error(w, "internal error", http.StatusInternalServerError)
+			return
+		}
+
+		resp := map[string]string{
+			"summary_table": reporting.FormatWorkoutSummaryTable(workout),
+			"zone_detail":   reporting.FormatWorkoutZoneDetail(workout),
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(resp) //nolint:errcheck
+	}
+}
+
+// workoutTimeSeriesHandler downloads parsed FIT records as CSV for a workout.
+// GET /api/workouts/{id}/timeseries.csv
+func workoutTimeSeriesHandler(db *sql.DB) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		idStr := chi.URLParam(r, "id")
+		id, err := strconv.ParseInt(idStr, 10, 64)
+		if err != nil || id <= 0 {
+			http.Error(w, "invalid workout id", http.StatusBadRequest)
+			return
+		}
+
+		workout, err := storage.GetWorkoutWithMetricsByID(db, id)
+		if err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				http.Error(w, "not found", http.StatusNotFound)
+				return
+			}
+			slog.Error("workoutTimeSeriesHandler", "id", id, "err", err)
+			http.Error(w, "internal error", http.StatusInternalServerError)
+			return
+		}
+		if workout.FITFilePath == nil || *workout.FITFilePath == "" {
+			http.Error(w, "no FIT file available", http.StatusNotFound)
+			return
+		}
+
+		parsed, err := fitpkg.ParseFile(*workout.FITFilePath)
+		if err != nil {
+			slog.Error("workoutTimeSeriesHandler: parse fit", "id", id, "err", err)
+			http.Error(w, "failed to parse FIT file", http.StatusInternalServerError)
+			return
+		}
+
+		w.Header().Set("Content-Type", "text/csv; charset=utf-8")
+		w.Header().Set("Content-Disposition", "attachment; filename=\"workout-"+workout.WahooID+"-timeseries.csv\"")
+
+		cw := csv.NewWriter(w)
+		_ = cw.Write([]string{"timestamp", "heart_rate_bpm", "power_watts", "cadence_rpm", "distance_m", "speed_ms"})
+		for _, rec := range parsed.Records {
+			_ = cw.Write([]string{
+				rec.Timestamp.Format(time.RFC3339),
+				strconv.Itoa(int(rec.HeartRate)),
+				strconv.Itoa(int(rec.Power)),
+				strconv.Itoa(int(rec.Cadence)),
+				strconv.FormatFloat(rec.DistanceM, 'f', 2, 64),
+				strconv.FormatFloat(rec.SpeedMS, 'f', 3, 64),
+			})
+		}
+		cw.Flush()
 	}
 }
 

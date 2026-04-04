@@ -141,14 +141,15 @@ func TestWebhook_WorkoutSummary_IngestsWorkout(t *testing.T) {
 
 	event := WebhookEvent{
 		EventType: "workout_summary",
-		WorkoutSummary: &APIWorkout{
-			ID:            42001,
-			WorkoutTypeID: 25,
-			Starts:        time.Date(2026, 3, 20, 9, 0, 0, 0, time.UTC),
-			Summary: &APISummary{
-				DurationTotalAccum: 3600,
-				HeartRateAvg:       130,
-				PowerAvg:           210,
+		WorkoutSummary: &WebhookWorkoutSummary{
+			DurationTotalAccum: 3600,
+			HeartRateAvg:       130,
+			PowerAvg:           210,
+			Workout: &WebhookWorkout{
+				ID:            42001,
+				WorkoutTypeID: 25,
+				Starts:        time.Date(2026, 3, 20, 9, 0, 0, 0, time.UTC),
+				Name:          "Morning Ride",
 			},
 		},
 	}
@@ -182,10 +183,12 @@ func TestWebhook_DuplicateEvent_Idempotent(t *testing.T) {
 
 	event := WebhookEvent{
 		EventType: "workout_summary",
-		WorkoutSummary: &APIWorkout{
-			ID:            55001,
-			WorkoutTypeID: 14,
-			Starts:        time.Date(2026, 3, 21, 8, 0, 0, 0, time.UTC),
+		WorkoutSummary: &WebhookWorkoutSummary{
+			Workout: &WebhookWorkout{
+				ID:            55001,
+				WorkoutTypeID: 14,
+				Starts:        time.Date(2026, 3, 21, 8, 0, 0, 0, time.UTC),
+			},
 		},
 	}
 	body, _ := json.Marshal(event)
@@ -227,5 +230,40 @@ func TestWebhook_WorkoutSummary_NilWorkout_Returns200(t *testing.T) {
 	h.Handle(w, req)
 	if w.Code != http.StatusOK {
 		t.Errorf("expected 200, got %d", w.Code)
+	}
+}
+
+func TestWebhookWorkoutSummary_ToAPIWorkout_UsesNestedWorkoutFields(t *testing.T) {
+	summary := &WebhookWorkoutSummary{
+		CaloriesAccum:      800,
+		CadenceAvg:         72,
+		DistanceAccum:      42000,
+		DurationTotalAccum: 3600,
+		HeartRateAvg:       130,
+		PowerAvg:           210,
+		File:               &APIFile{URL: "https://server.example/test.fit"},
+		Workout: &WebhookWorkout{
+			ID:            56519,
+			Name:          "Friday Fun",
+			Starts:        time.Date(2026, 4, 3, 17, 22, 32, 0, time.UTC),
+			WorkoutTypeID: 25,
+		},
+	}
+
+	got := summary.ToAPIWorkout()
+	if got == nil {
+		t.Fatal("expected non-nil APIWorkout")
+	}
+	if got.ID != 56519 {
+		t.Fatalf("ID = %d, want 56519", got.ID)
+	}
+	if got.Starts != summary.Workout.Starts {
+		t.Fatalf("Starts = %v, want %v", got.Starts, summary.Workout.Starts)
+	}
+	if got.WorkoutTypeID != 25 {
+		t.Fatalf("WorkoutTypeID = %d, want 25", got.WorkoutTypeID)
+	}
+	if got.Summary == nil || got.Summary.File == nil || got.Summary.File.URL != "https://server.example/test.fit" {
+		t.Fatalf("FIT file URL not carried through: %+v", got.Summary)
 	}
 }

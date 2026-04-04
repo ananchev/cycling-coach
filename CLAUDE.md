@@ -90,6 +90,24 @@ testdata/            sample FIT file
 
 Important: scheduled jobs are disabled unless their corresponding cron env var is set.
 
+Also note: the scheduler always registers one fixed daily housekeeping job in code at `23:50 Europe/Amsterdam` to create a manual placeholder workout for days with no recorded training.
+
+## Current Wahoo Payload Handling
+
+The code intentionally distinguishes between the Wahoo polling payload and the Wahoo webhook payload.
+
+- polling/API shape:
+  - top-level workout fields such as `id`, `starts`, and `workout_type_id`
+  - nested `workout_summary`
+- webhook shape:
+  - top-level `event_type` and `webhook_token`
+  - nested `workout_summary.workout.id`
+  - nested `workout_summary.workout.starts`
+  - nested `workout_summary.workout.workout_type_id`
+  - FIT URL at `workout_summary.file.url`
+
+The webhook handler converts Wahoo's documented nested webhook payload into the shared internal `APIWorkout` shape before ingestion so sync and webhook continue to share the same insert/download path.
+
 ## Athlete Profile
 
 The canonical athlete profile is a markdown file at `ATHLETE_PROFILE_PATH`, defaulting to `/data/athlete-profile.md`.
@@ -144,6 +162,9 @@ Implemented routes:
 - `/api/report/{id}`
 - `/api/profile/evolve`
 - `/api/body-metrics`
+- `/api/workouts/{id}/data`
+- `/api/workouts/{id}/timeseries.csv`
+- `POST /api/notes`
 - `/api/notes`
 - `/api/notes/{id}`
 - `/api/logs/stream`
@@ -159,6 +180,21 @@ Not implemented despite older docs:
 The active report/plan rendering path is [`internal/reporting/renderer.go`](/Users/ananchev/Development/cycling-coach/internal/reporting/renderer.go), which builds HTML from an inline template and stores it in `reports.full_html`.
 
 The files under `templates/` and `static/` are not the active renderer today, even though they are still copied into the Docker image.
+
+Separate from report rendering, the admin UI also exposes modal-only workout views built from [`internal/reporting/ride_view.go`](/Users/ananchev/Development/cycling-coach/internal/reporting/ride_view.go):
+
+- a fixed-width summary row preview
+- a per-ride zone-detail preview
+
+These are admin display helpers only; they do not change the Claude prompt formatting in `internal/reporting/assembler.go`.
+
+## Current Admin Behavior
+
+- workouts are shown primarily by external `wahoo_id`, not internal SQLite row id
+- body metrics support backend date filtering
+- notes can be created from the admin UI as well as edited/deleted there
+- workouts expose a FIT time-series CSV download when a FIT file exists
+- a placeholder manual workout may appear for a day with no recorded workout; if a real workout arrives later for that day, the placeholder is reconciled away and its notes are moved
 
 ## Conventions
 

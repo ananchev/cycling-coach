@@ -105,3 +105,35 @@ func TestLinkNoteToWorkout(t *testing.T) {
 		t.Errorf("WorkoutID = %v, want %d", notes[0].WorkoutID, wid)
 	}
 }
+
+func TestListBodyMetrics_ByDateRange(t *testing.T) {
+	db := openTestDB(t)
+
+	insertMetric := func(day int, weight float64) {
+		if _, err := InsertNote(db, &AthleteNote{
+			Timestamp: time.Date(2026, 3, day, 8, 0, 0, 0, time.UTC),
+			Type:      NoteTypeWeight,
+			WeightKG:  &weight,
+		}); err != nil {
+			t.Fatalf("InsertNote day %d: %v", day, err)
+		}
+	}
+
+	insertMetric(5, 90.1)
+	insertMetric(10, 89.8)
+	insertMetric(20, 89.4)
+
+	from := time.Date(2026, 3, 8, 0, 0, 0, 0, time.UTC)
+	to := time.Date(2026, 3, 15, 23, 59, 59, 0, time.UTC)
+
+	got, err := ListBodyMetrics(db, from, to, 100)
+	if err != nil {
+		t.Fatalf("ListBodyMetrics: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("expected 1 body metric in range, got %d", len(got))
+	}
+	if got[0].WeightKG == nil || *got[0].WeightKG != 89.8 {
+		t.Fatalf("unexpected metric returned: %+v", got[0])
+	}
+}

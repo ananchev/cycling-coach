@@ -42,9 +42,12 @@ func NewRouter(cfg *config.Config, db *sql.DB, auth *wahoo.AuthHandler, syncer *
 	r.Post("/api/report/send", sendReportHandler(delivery))
 	r.Delete("/api/report/{id}", deleteReportHandler(db))
 	r.Post("/api/profile/evolve", evolveProfileHandler(orch))
+	r.Get("/api/workouts/{id}/data", workoutDataHandler(db))
+	r.Get("/api/workouts/{id}/timeseries.csv", workoutTimeSeriesHandler(db))
 
 	// Body metrics & note management.
 	r.Get("/api/body-metrics", bodyMetricsHandler(db))
+	r.Post("/api/notes", createNoteHandler(db))
 	r.Get("/api/notes", listNotesHandler(db))
 	r.Put("/api/notes/{id}", updateNoteHandler(db))
 	r.Delete("/api/notes/{id}", deleteNoteHandler(db))

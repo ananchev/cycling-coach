@@ -101,6 +101,10 @@ var adminTmpl = template.Must(template.New("admin").Funcs(template.FuncMap{
   .status-dot.yes{background:#22c55e}
   .status-dot.no{background:#d1d5db}
   .note-icon{cursor:pointer;font-size:1rem}
+  .icon-row{display:flex;gap:8px;align-items:center}
+  .icon-btn{font-size:1rem;text-decoration:none;cursor:pointer;display:inline-flex;align-items:center}
+  .icon-btn.muted{opacity:.28;cursor:default}
+  .icon-btn.active:hover{transform:translateY(-1px)}
   .modal-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.4);z-index:100;justify-content:center;align-items:center}
   .modal-overlay.show{display:flex}
   .modal{background:#fff;border-radius:8px;padding:20px 24px;max-width:500px;width:90%;box-shadow:0 8px 32px rgba(0,0,0,.2)}
@@ -207,18 +211,17 @@ var adminTmpl = template.Must(template.New("admin").Funcs(template.FuncMap{
   <div style="overflow-x:auto">
   <table>
     <thead><tr>
-      <th>#</th><th>Date</th><th>Type</th><th>Duration</th><th>Source</th>
+      <th>Workout ID</th><th>Date</th><th>Type</th><th>Duration</th>
       <th>Avg Power</th><th>Avg HR</th><th>NP</th><th>TSS</th><th>HR Drift</th>
-      <th>FIT</th><th>Processed</th><th title="Ride notes">Ride</th><th title="General notes">Notes</th>
+      <th>FIT</th><th>Processed</th><th title="Workout data and notes">Data</th>
     </tr></thead>
     <tbody>
     {{range .Workouts}}
     <tr>
-      <td>{{.ID}}</td>
+      <td title="internal row id {{.ID}}">{{.WahooID}}</td>
       <td style="white-space:nowrap">{{fmtDate .StartedAt}}</td>
       <td>{{if .WorkoutType}}{{deref .WorkoutType}}{{else}}—{{end}}</td>
       <td class="num">{{fmtDuration .DurationSec}}</td>
-      <td>{{.Source}}</td>
       <td class="num">{{fmtOpt .AvgPower "%.0f W"}}</td>
       <td class="num">{{fmtOpt .AvgHR "%.0f"}}</td>
       <td class="num">{{fmtOpt .NormalizedPower "%.0f W"}}</td>
@@ -226,8 +229,27 @@ var adminTmpl = template.Must(template.New("admin").Funcs(template.FuncMap{
       <td class="num">{{fmtOpt .HRDriftPct "%.1f%%"}}</td>
       <td>{{if .FITFilePath}}<span class="status-dot yes"></span>{{else}}<span class="status-dot no"></span>{{end}}</td>
       <td>{{if .Processed}}<span class="status-dot yes"></span>{{else}}<span class="status-dot no"></span>{{end}}</td>
-      <td>{{if .RideNotes}}<span class="note-icon" onclick="showNotes({{.ID}}, 'ride')" title="Ride notes">💬</span>{{end}}</td>
-      <td>{{if .GeneralNotes}}<span class="note-icon" onclick="showNotes({{.ID}}, 'note')" title="General notes">📝</span>{{end}}</td>
+      <td>
+        <div class="icon-row">
+          <span class="icon-btn {{if .RideNotes}}active{{else}}muted{{end}}" onclick="showNotes({{.ID}}, 'ride')" title="Ride notes">💬</span>
+          <span class="icon-btn {{if .GeneralNotes}}active{{else}}muted{{end}}" onclick="showNotes({{.ID}}, 'note')" title="General notes">📝</span>
+          {{if ne .Source "manual"}}
+          <span class="icon-btn active" onclick="showWorkoutData({{.ID}}, 'summary')" title="View summary row">📊</span>
+          {{else}}
+          <span class="icon-btn muted" title="No workout stored for this day">📊</span>
+          {{end}}
+          {{if or .PwrZ1Pct .ZoneTimeline}}
+          <span class="icon-btn active" onclick="showWorkoutData({{.ID}}, 'zones')" title="View zone detail">🧩</span>
+          {{else}}
+          <span class="icon-btn muted" title="No per-ride zone detail available">🧩</span>
+          {{end}}
+          {{if .FITFilePath}}
+          <a class="icon-btn active" href="/api/workouts/{{.ID}}/timeseries.csv" title="Download time-phased data">⬇️</a>
+          {{else}}
+          <span class="icon-btn muted" title="No FIT time-series data available">⬇️</span>
+          {{end}}
+        </div>
+      </td>
     </tr>
     {{end}}
     </tbody>
@@ -282,6 +304,12 @@ var adminTmpl = template.Must(template.New("admin").Funcs(template.FuncMap{
 <div class="tab-pane{{if eq .ActiveTab "body"}} active{{end}}" id="tab-body">
 <div class="card">
   <h2>Body Metrics</h2>
+  <div class="row" style="margin-bottom:12px">
+    <div class="field"><label>From</label><input type="date" id="body-from"></div>
+    <div class="field"><label>To</label><input type="date" id="body-to"></div>
+    <button type="button" onclick="applyBodyFilters()">Apply</button>
+    <button type="button" class="secondary" onclick="resetBodyFilters()">Reset</button>
+  </div>
   <p class="hint" style="margin-bottom:16px">Data logged via Telegram: /weight, /bodyfat, /muscle</p>
   <div id="body-charts">
     <canvas id="chart-weight" height="200"></canvas>
@@ -307,9 +335,23 @@ var adminTmpl = template.Must(template.New("admin").Funcs(template.FuncMap{
 <div class="modal-overlay" id="note-modal" onclick="if(event.target===this)closeNoteModal()">
   <div class="modal" style="max-width:600px">
     <h3>Athlete Notes</h3>
+    <div style="margin-bottom:10px">
+      <textarea id="note-add-text" rows="3" style="width:100%;padding:6px;border:1px solid #ccc;border-radius:4px;font-size:.9rem;font-family:inherit;resize:vertical" placeholder="Add a note for this workout/day..."></textarea>
+      <div style="display:flex;gap:8px;margin-top:8px">
+        <button onclick="createNote()">Add Note</button>
+      </div>
+    </div>
     <div id="note-modal-body"></div>
     <div class="result" id="note-modal-result" style="margin-bottom:8px"></div>
     <button class="secondary" onclick="closeNoteModal()">Close</button>
+  </div>
+</div>
+
+<div class="modal-overlay" id="workout-data-modal" onclick="if(event.target===this)closeWorkoutDataModal()">
+  <div class="modal" style="max-width:1100px;width:min(96vw,1100px)">
+    <h3 id="workout-data-title">Workout Data</h3>
+    <pre id="workout-data-body" style="background:#f8fafc;color:#111;font-family:'Courier New',monospace;font-size:.85rem;padding:12px;border-radius:6px;max-height:420px;overflow:auto;white-space:pre"></pre>
+    <button class="secondary" onclick="closeWorkoutDataModal()">Close</button>
   </div>
 </div>
 
@@ -549,10 +591,35 @@ function closeNoteModal() {
   document.getElementById('note-modal-result').style.display = 'none';
 }
 
+function closeWorkoutDataModal() {
+  document.getElementById('workout-data-modal').classList.remove('show');
+}
+
+async function showWorkoutData(workoutId, kind) {
+  var title = document.getElementById('workout-data-title');
+  var body = document.getElementById('workout-data-body');
+  title.textContent = kind === 'summary' ? 'Workout Summary Row' : 'Per-Ride Zone Detail';
+  body.textContent = 'Loading...';
+  document.getElementById('workout-data-modal').classList.add('show');
+  try {
+    var r = await fetch('/api/workouts/' + workoutId + '/data');
+    if (!r.ok) {
+      body.textContent = 'Failed to load workout data.';
+      return;
+    }
+    var j = await r.json();
+    var text = kind === 'summary' ? j.summary_table : j.zone_detail;
+    body.textContent = text || 'No data available for this workout yet.';
+  } catch(e) {
+    body.textContent = e.toString();
+  }
+}
+
 var currentNoteType = null;
 async function showNotes(workoutId, noteType) {
   currentNoteWorkoutId = workoutId;
   currentNoteType = noteType;
+  document.getElementById('note-add-text').value = '';
   var body = document.getElementById('note-modal-body');
   var title = document.querySelector('#note-modal .modal h3');
   title.textContent = noteType === 'ride' ? 'Ride Notes' : 'General Notes';
@@ -586,6 +653,28 @@ async function showNotes(workoutId, noteType) {
         + '</div>';
     }).join('');
   } catch(e) { body.innerHTML = '<p style="color:#991b1b">Failed to load notes.</p>'; }
+}
+
+async function createNote() {
+  var text = document.getElementById('note-add-text').value.trim();
+  if (!text) {
+    showResult('note-modal-result', false, 'Enter a note first.');
+    return;
+  }
+  try {
+    var r = await fetch('/api/notes', {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({
+        type: currentNoteType,
+        note: text,
+        workout_id: currentNoteWorkoutId
+      })
+    });
+    if (!r.ok) { showResult('note-modal-result', false, 'Create failed.'); return; }
+    document.getElementById('note-add-text').value = '';
+    showNotes(currentNoteWorkoutId, currentNoteType);
+  } catch(e) { showResult('note-modal-result', false, e.toString()); }
 }
 
 function escHtml(s) {
@@ -645,10 +734,24 @@ async function deleteNote(id) {
 
 // --- body metrics charts ---
 var bodyChartsLoaded = false;
-function loadBodyCharts() {
-  if (bodyChartsLoaded) return;
+function loadBodyCharts(forceReload) {
+  if (bodyChartsLoaded && !forceReload) return;
   bodyChartsLoaded = true;
-  fetch('/api/body-metrics').then(r => r.json()).then(function(data) {
+
+  var from = document.getElementById('body-from').value;
+  var to = document.getElementById('body-to').value;
+  var qs = new URLSearchParams();
+  if (from) qs.set('from', from);
+  if (to) qs.set('to', to);
+  var url = '/api/body-metrics' + (qs.toString() ? '?' + qs.toString() : '');
+
+  document.getElementById('chart-weight').style.display = '';
+  document.getElementById('chart-bodyfat').style.display = '';
+  document.getElementById('chart-muscle').style.display = '';
+  document.getElementById('body-charts').style.display = '';
+  document.getElementById('body-empty').style.display = 'none';
+
+  fetch(url).then(r => r.json()).then(function(data) {
     if (!data || data.length === 0) {
       document.getElementById('body-charts').style.display = 'none';
       document.getElementById('body-empty').style.display = 'block';
@@ -667,6 +770,16 @@ function loadBodyCharts() {
     if (mmData.length) drawChart('chart-muscle', 'Muscle Mass (kg)', mmData.map(d => d.date), mmData.map(d => d.muscle_mass_kg), '#22c55e');
     else document.getElementById('chart-muscle').style.display = 'none';
   });
+}
+
+function applyBodyFilters() {
+  loadBodyCharts(true);
+}
+
+function resetBodyFilters() {
+  document.getElementById('body-from').value = '';
+  document.getElementById('body-to').value = '';
+  loadBodyCharts(true);
 }
 
 function drawChart(canvasId, label, labels, values, color) {

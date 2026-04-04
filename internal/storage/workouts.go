@@ -136,6 +136,18 @@ type WorkoutWithMetrics struct {
 	NormalizedPower *float64
 	TSS             *float64
 	HRDriftPct      *float64
+	IntensityFactor *float64
+	PwrZ1Pct        *float64
+	PwrZ2Pct        *float64
+	PwrZ3Pct        *float64
+	PwrZ4Pct        *float64
+	PwrZ5Pct        *float64
+	HRZ1Pct         *float64
+	HRZ2Pct         *float64
+	HRZ3Pct         *float64
+	HRZ4Pct         *float64
+	HRZ5Pct         *float64
+	ZoneTimeline    *string
 	// Notes linked to this workout, split by type
 	RideNotes    *string // type='ride' notes concatenated
 	GeneralNotes *string // type='note' notes concatenated
@@ -147,7 +159,10 @@ func ListWorkoutsWithMetrics(db *sql.DB, from, to time.Time, limit int) ([]Worko
 		SELECT w.id, w.wahoo_id, w.started_at, w.duration_sec,
 		       COALESCE(wt.description, w.workout_type),
 		       w.source, w.processed, w.fit_file_path,
-		       m.avg_power, m.avg_hr, m.normalized_power, m.tss, m.hr_drift_pct,
+		       m.avg_power, m.avg_hr, m.normalized_power, m.tss, m.hr_drift_pct, m.intensity_factor,
+		       m.pwr_z1_pct, m.pwr_z2_pct, m.pwr_z3_pct, m.pwr_z4_pct, m.pwr_z5_pct,
+		       m.hr_z1_pct, m.hr_z2_pct, m.hr_z3_pct, m.hr_z4_pct, m.hr_z5_pct,
+		       m.zone_timeline,
 		       GROUP_CONCAT(CASE WHEN n.type='ride' THEN n.note END, ' | '),
 		       GROUP_CONCAT(CASE WHEN n.type='note' THEN n.note END, ' | ')
 		FROM workouts w
@@ -179,7 +194,10 @@ func ListWorkoutsWithMetrics(db *sql.DB, from, to time.Time, limit int) ([]Worko
 		if err := rows.Scan(
 			&wm.ID, &wm.WahooID, &wm.StartedAt, &wm.DurationSec, &wm.WorkoutType,
 			&wm.Source, &wm.Processed, &wm.FITFilePath,
-			&wm.AvgPower, &wm.AvgHR, &wm.NormalizedPower, &wm.TSS, &wm.HRDriftPct,
+			&wm.AvgPower, &wm.AvgHR, &wm.NormalizedPower, &wm.TSS, &wm.HRDriftPct, &wm.IntensityFactor,
+			&wm.PwrZ1Pct, &wm.PwrZ2Pct, &wm.PwrZ3Pct, &wm.PwrZ4Pct, &wm.PwrZ5Pct,
+			&wm.HRZ1Pct, &wm.HRZ2Pct, &wm.HRZ3Pct, &wm.HRZ4Pct, &wm.HRZ5Pct,
+			&wm.ZoneTimeline,
 			&wm.RideNotes, &wm.GeneralNotes,
 		); err != nil {
 			return nil, fmt.Errorf("storage.ListWorkoutsWithMetrics: scan: %w", err)
@@ -187,6 +205,40 @@ func ListWorkoutsWithMetrics(db *sql.DB, from, to time.Time, limit int) ([]Worko
 		out = append(out, wm)
 	}
 	return out, rows.Err()
+}
+
+// GetWorkoutWithMetricsByID returns a single workout row with joined metrics and resolved workout type.
+func GetWorkoutWithMetricsByID(db *sql.DB, id int64) (*WorkoutWithMetrics, error) {
+	row := db.QueryRow(`
+		SELECT w.id, w.wahoo_id, w.started_at, w.duration_sec,
+		       COALESCE(wt.description, w.workout_type),
+		       w.source, w.processed, w.fit_file_path,
+		       m.avg_power, m.avg_hr, m.normalized_power, m.tss, m.hr_drift_pct, m.intensity_factor,
+		       m.pwr_z1_pct, m.pwr_z2_pct, m.pwr_z3_pct, m.pwr_z4_pct, m.pwr_z5_pct,
+		       m.hr_z1_pct, m.hr_z2_pct, m.hr_z3_pct, m.hr_z4_pct, m.hr_z5_pct,
+		       m.zone_timeline,
+		       GROUP_CONCAT(CASE WHEN n.type='ride' THEN n.note END, ' | '),
+		       GROUP_CONCAT(CASE WHEN n.type='note' THEN n.note END, ' | ')
+		FROM workouts w
+		LEFT JOIN ride_metrics m ON m.workout_id = w.id
+		LEFT JOIN workout_types wt ON wt.id = w.workout_type_id
+		LEFT JOIN athlete_notes n ON n.workout_id = w.id AND n.note IS NOT NULL AND n.note != ''
+		WHERE w.id = ?
+		GROUP BY w.id`, id)
+
+	var wm WorkoutWithMetrics
+	if err := row.Scan(
+		&wm.ID, &wm.WahooID, &wm.StartedAt, &wm.DurationSec, &wm.WorkoutType,
+		&wm.Source, &wm.Processed, &wm.FITFilePath,
+		&wm.AvgPower, &wm.AvgHR, &wm.NormalizedPower, &wm.TSS, &wm.HRDriftPct, &wm.IntensityFactor,
+		&wm.PwrZ1Pct, &wm.PwrZ2Pct, &wm.PwrZ3Pct, &wm.PwrZ4Pct, &wm.PwrZ5Pct,
+		&wm.HRZ1Pct, &wm.HRZ2Pct, &wm.HRZ3Pct, &wm.HRZ4Pct, &wm.HRZ5Pct,
+		&wm.ZoneTimeline,
+		&wm.RideNotes, &wm.GeneralNotes,
+	); err != nil {
+		return nil, fmt.Errorf("storage.GetWorkoutWithMetricsByID: %w", err)
+	}
+	return &wm, nil
 }
 
 // scanner abstracts *sql.Row and *sql.Rows so a single scan function handles both.

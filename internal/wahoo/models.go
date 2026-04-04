@@ -77,6 +77,56 @@ type APIFile struct {
 	URL string `json:"url"`
 }
 
+// WebhookWorkout is the nested "workout" object inside Wahoo's documented
+// workout_summary webhook payload.
+type WebhookWorkout struct {
+	ID            int64     `json:"id"`
+	Name          string    `json:"name"`
+	Starts        time.Time `json:"starts"`
+	WorkoutTypeID int64     `json:"workout_type_id"`
+}
+
+// WebhookWorkoutSummary is the documented "workout_summary" object posted by
+// the Wahoo webhook. Unlike the polling API shape, the workout identity and
+// start time live under the nested "workout" object while the FIT URL lives on
+// the summary object itself.
+type WebhookWorkoutSummary struct {
+	ID                  int64           `json:"id"`
+	CaloriesAccum       flexFloat64     `json:"calories_accum"`
+	CadenceAvg          flexFloat64     `json:"cadence_avg"`
+	DistanceAccum       flexFloat64     `json:"distance_accum"`
+	DurationActiveAccum flexFloat64     `json:"duration_active_accum"`
+	DurationTotalAccum  flexFloat64     `json:"duration_total_accum"`
+	HeartRateAvg        flexFloat64     `json:"heart_rate_avg"`
+	PowerAvg            flexFloat64     `json:"power_avg"`
+	File                *APIFile        `json:"file"`
+	Workout             *WebhookWorkout `json:"workout"`
+}
+
+// ToAPIWorkout converts the webhook-specific nested payload shape into the same
+// APIWorkout shape used by the sync/polling path so ingestion logic can be shared.
+func (w *WebhookWorkoutSummary) ToAPIWorkout() *APIWorkout {
+	if w == nil || w.Workout == nil {
+		return nil
+	}
+	return &APIWorkout{
+		ID:            w.Workout.ID,
+		Name:          w.Workout.Name,
+		Starts:        w.Workout.Starts,
+		WorkoutTypeID: w.Workout.WorkoutTypeID,
+		Summary: &APISummary{
+			CaloriesAccum:       w.CaloriesAccum,
+			CadenceAvg:          w.CadenceAvg,
+			DistanceAccum:       w.DistanceAccum,
+			DurationActiveAccum: w.DurationActiveAccum,
+			DurationTotalAccum:  w.DurationTotalAccum,
+			HeartRateAvg:        w.HeartRateAvg,
+			PowerAvg:            w.PowerAvg,
+			File:                w.File,
+		},
+	}
+}
+
 // ToWorkout converts an APIWorkout to the internal storage type.
 func (w *APIWorkout) ToWorkout() *storage.Workout {
 	wt := workoutTypeName(w.WorkoutTypeID)
@@ -122,9 +172,9 @@ func workoutTypeName(id int64) string {
 // WebhookEvent is the JSON payload POSTed by Wahoo to /wahoo/webhook.
 // Only "workout_summary" events are acted on; all others are logged and acknowledged.
 type WebhookEvent struct {
-	EventType      string      `json:"event_type"`
-	WebhookToken   string      `json:"webhook_token"`
-	WorkoutSummary *APIWorkout `json:"workout_summary"`
+	EventType      string                 `json:"event_type"`
+	WebhookToken   string                 `json:"webhook_token"`
+	WorkoutSummary *WebhookWorkoutSummary `json:"workout_summary"`
 }
 
 // optionalFloat returns a pointer to v, or nil when v is zero.

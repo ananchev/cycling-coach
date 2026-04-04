@@ -23,12 +23,14 @@ This file describes the implementation that exists in the repository today. When
 - Paginated workout sync through the Wahoo API
 - FIT download when the API payload contains a file URL
 - Idempotent workout ingestion keyed by `wahoo_id`
+- Webhook ingestion explicitly maps Wahoo's documented nested webhook payload, where workout identity/start time are under `workout_summary.workout` and the FIT URL is under `workout_summary.file`
 
 ### Analysis
 
 - FIT parsing with `github.com/muktihari/fit`
 - Per-ride metrics stored in `ride_metrics`
 - Reprocessing, FIT reset, and FIT ignore flows through the admin/API layer
+- FIT time-series CSV export from stored FIT files
 
 ### Reporting
 
@@ -50,6 +52,8 @@ This file describes the implementation that exists in the repository today. When
 - Health endpoint at `/health`
 - APIs for sync, processing, report generation, report sending, report deletion, note management, body metrics, log streaming, and profile evolution
 - SSE log stream at `/api/logs/stream`
+- Workout admin actions for note state, summary-row preview, per-ride zone preview, and FIT time-series download
+- Body-metrics charts with date-range filtering
 
 ## Current Routes
 
@@ -77,9 +81,12 @@ This file describes the implementation that exists in the repository today. When
 - `DELETE /api/report/{id}`
 - `POST /api/profile/evolve`
 - `GET /api/body-metrics`
+- `POST /api/notes`
 - `GET /api/notes`
 - `PUT /api/notes/{id}`
 - `DELETE /api/notes/{id}`
+- `GET /api/workouts/{id}/data`
+- `GET /api/workouts/{id}/timeseries.csv`
 - `GET /api/logs/stream`
 
 ## Current Telegram Commands
@@ -132,6 +139,12 @@ CRON_WEEKLY_REPORT=
 
 If all three are empty, the scheduler starts with no active jobs.
 
+One scheduler job is always registered in code and is not env-controlled:
+
+- `23:50 Europe/Amsterdam`: create a manual placeholder workout for that day when no workout exists yet
+
+If a real Wahoo workout for that same day arrives later, the placeholder workout is automatically reconciled away and any notes linked to it are moved onto the real workout.
+
 ## Quick Start
 
 ```bash
@@ -166,6 +179,14 @@ curl -X POST http://localhost:8080/api/sync \
   -H 'Content-Type: application/json' \
   -d '{"from":"2026-03-01","to":"2026-03-31"}'
 ```
+
+Webhook note:
+
+- the polling API and webhook payloads are not treated as identical
+- polling uses top-level workout fields plus nested `workout_summary`
+- the webhook uses nested workout fields under `workout_summary.workout`
+- the webhook FIT URL is read from `workout_summary.file.url`
+- the current implementation converts the webhook payload into the shared ingestion shape before inserting/downloading
 
 ### Process FIT files
 
@@ -203,6 +224,26 @@ curl -X POST http://localhost:8080/api/report/send \
   -d '{"report_id":1}'
 ```
 
+### Create a note from the admin/API side
+
+```bash
+curl -X POST http://localhost:8080/api/notes \
+  -H 'Content-Type: application/json' \
+  -d '{"type":"note","note":"Travel day, skipped training","workout_id":1421}'
+```
+
+### Filter body metrics by date
+
+```bash
+curl "http://localhost:8080/api/body-metrics?from=2026-03-01&to=2026-03-31"
+```
+
+### Download workout FIT time-series data
+
+```bash
+curl -O http://localhost:8080/api/workouts/1421/timeseries.csv
+```
+
 ## Data Model
 
 Main tables:
@@ -215,6 +256,30 @@ Main tables:
 - `reports`
 - `report_deliveries`
 - `workout_types`
+
+The `workouts` table now also stores synthetic manual placeholder rows for days where no workout was recorded by 23:50 local time. These placeholders are created with source `manual`, are marked processed immediately, and can later be replaced automatically by a real Wahoo workout from the same day.
+
+## Admin UI Notes
+
+In the workouts tab:
+
+- the primary identifier shown is the external `wahoo_id`
+- ride notes and general notes are always shown as icons, with grey indicating absence
+- the data/actions column includes:
+  - ride notes
+  - general notes
+  - summary-row popup
+  - per-ride zone-detail popup
+  - FIT time-series CSV download
+
+In the body tab:
+
+- weight, body fat, and muscle mass charts can be filtered by `From` / `To` date
+
+In the notes modal:
+
+- existing notes can still be viewed, edited, and deleted
+- new notes can now be created directly from the admin UI
 
 Migrations are defined in [`internal/storage/db.go`](/Users/ananchev/Development/cycling-coach/internal/storage/db.go).
 

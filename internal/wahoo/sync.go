@@ -100,7 +100,7 @@ func (s *Syncer) IngestAPIWorkout(ctx context.Context, w *APIWorkout) (bool, err
 func (s *Syncer) ingestWorkout(ctx context.Context, w *APIWorkout, result *SyncResult) error {
 	workout := w.ToWorkout()
 
-	_, inserted, err := storage.UpsertWorkout(s.db, workout)
+	id, inserted, err := storage.UpsertWorkout(s.db, workout)
 	if err != nil {
 		return fmt.Errorf("wahoo.Syncer.ingestWorkout %s: upsert: %w", workout.WahooID, err)
 	}
@@ -111,6 +111,12 @@ func (s *Syncer) ingestWorkout(ctx context.Context, w *APIWorkout, result *SyncR
 			"wahoo_id", workout.WahooID,
 			"started_at", workout.StartedAt,
 		)
+		loc, locErr := time.LoadLocation("Europe/Amsterdam")
+		if locErr != nil {
+			slog.Warn("wahoo: load timezone for placeholder reconciliation", "err", locErr)
+		} else if err := storage.ReconcilePlaceholderWorkout(s.db, id, workout.StartedAt, loc); err != nil {
+			slog.Warn("wahoo: reconcile placeholder failed", "wahoo_id", workout.WahooID, "err", err)
+		}
 	} else {
 		result.Skipped++
 	}

@@ -73,7 +73,11 @@ func (h *WebhookHandler) handleWorkoutSummary(r *http.Request, event *WebhookEve
 		return
 	}
 
-	w := event.WorkoutSummary
+	w := event.WorkoutSummary.ToAPIWorkout()
+	if w == nil {
+		slog.Warn("wahoo webhook: workout_summary event missing nested workout payload")
+		return
+	}
 	slog.Info("wahoo webhook: ingesting workout", "wahoo_id", w.ID)
 
 	inserted, err := h.syncer.IngestAPIWorkout(r.Context(), w)

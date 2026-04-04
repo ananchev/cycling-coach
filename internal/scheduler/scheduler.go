@@ -44,6 +44,11 @@ func NewScheduler(cfg *config.Config, syncer *wahoo.Syncer, processor *analysis.
 
 	var registered []string
 
+	if _, err := c.AddFunc("50 23 * * *", s.runDailyPlaceholder); err != nil {
+		return nil, err
+	}
+	registered = append(registered, "daily-placeholder=50 23 * * *")
+
 	if cfg.CronSync != "" {
 		if _, err := c.AddFunc(cfg.CronSync, s.runSync); err != nil {
 			return nil, err
@@ -176,4 +181,27 @@ func (s *Scheduler) runWeeklyReport() {
 		return
 	}
 	slog.Info("scheduler: delivery complete", "sent", n)
+}
+
+func (s *Scheduler) runDailyPlaceholder() {
+	if s.processor == nil {
+		slog.Warn("scheduler: daily placeholder skipped, processor not configured")
+		return
+	}
+
+	loc, err := time.LoadLocation("Europe/Amsterdam")
+	if err != nil {
+		slog.Error("scheduler: daily placeholder timezone", "err", err)
+		return
+	}
+
+	now := time.Now().In(loc)
+	id, inserted, err := storage.UpsertDailyPlaceholderWorkout(s.processor.DB(), now, loc)
+	if err != nil {
+		slog.Error("scheduler: daily placeholder failed", "err", err)
+		return
+	}
+	if inserted {
+		slog.Info("scheduler: daily placeholder created", "workout_id", id, "day", now.Format("2006-01-02"))
+	}
 }
