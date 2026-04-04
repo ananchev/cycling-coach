@@ -38,6 +38,135 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for the full system design.
 
 The athlete profile is runtime config — it lives in the data volume (`/data/athlete-profile.md`), not in the codebase. The seed file provides the initial version.
 
+## Wahoo setup
+
+### 1. Configure credentials
+
+Register a developer app at [developers.wahooligan.com](https://developers.wahooligan.com) and populate `.env`:
+
+```env
+WAHOO_CLIENT_ID=<your client id>
+WAHOO_CLIENT_SECRET=<your client secret>
+WAHOO_REDIRECT_URI=https://coach.tonio.cc/wahoo/callback
+```
+
+For local development, set `WAHOO_REDIRECT_URI=http://localhost:8080/wahoo/callback`.
+
+### 2. Authenticate
+
+Start the server (`make dev`) and open:
+
+```
+http://localhost:8080/wahoo/authorize
+```
+
+You will be redirected to Wahoo's consent page. After granting access, the callback stores the OAuth2 token in SQLite. The token refreshes automatically before every API call (tokens expire every 2 hours).
+
+### 3. Trigger a sync
+
+```bash
+curl -X POST http://localhost:8080/api/sync
+```
+
+Response:
+```json
+{"inserted": 47, "skipped": 0, "errors": null}
+```
+
+Subsequent calls are idempotent — workouts already in the database are skipped:
+```json
+{"inserted": 0, "skipped": 47, "errors": null}
+```
+
+FIT files are downloaded to `$FIT_FILES_PATH` (default `/data/fit_files/`) alongside each ingested workout. They are used by the analysis engine in a later phase.
+
+### 4. Verify ingestion
+
+```bash
+sqlite3 /data/cycling.db "SELECT wahoo_id, started_at, avg_power, processed FROM workouts ORDER BY started_at DESC LIMIT 5;"
+```
+
+## Telegram delivery
+
+Set credentials in `.env`:
+
+```env
+TELEGRAM_BOT_TOKEN=<your bot token from @BotFather>
+TELEGRAM_CHAT_ID=<your numeric Telegram chat/user ID>
+```
+
+Delivery is **optional** — the server starts normally without these values, but `POST /api/report/send` will return 503 and the scheduled Sunday delivery job will be skipped.
+
+### Manual send
+
+Send a specific report by ID (generate one first with `POST /api/report`):
+
+```bash
+curl -X POST http://localhost:8080/api/report/send \
+  -H 'Content-Type: application/json' \
+  -d '{"report_id": 1}'
+```
+
+### View report HTML
+
+Full report pages are served at:
+
+```
+GET /reports/{id}    → weekly report
+GET /plans/{id}      → weekly training plan
+```
+
+These are protected by Cloudflare Access in production.
+
+### Delivery state
+
+Each send attempt is recorded in the `report_deliveries` table:
+
+```bash
+sqlite3 /data/cycling.db \
+  "SELECT r.type, r.week_start, d.status, d.sent_at, d.error
+   FROM report_deliveries d
+   JOIN reports r ON r.id = d.report_id
+   ORDER BY r.week_start DESC;"
+```
+
+| status | meaning |
+|--------|---------|
+| `pending` | delivery record created, not yet sent |
+| `sent` | successfully delivered to Telegram |
+| `failed` | last send attempt failed (error column has details) |
+
+A failed delivery can be retried by calling `POST /api/report/send` again with the same `report_id`.
+
+## Scheduled pipeline
+
+The scheduler starts automatically with the server and runs three jobs:
+
+| Job | Schedule | What |
+|-----|----------|------|
+| Wahoo sync | Every 4 hours | Polls for workouts missed by the webhook |
+| FIT processing | Every 15 min | Reserved for Phase 6 analysis engine |
+| Weekly report + delivery | Sunday 20:00 CET | Generates report + plan for current week, sends both via Telegram |
+
+### Run the full pipeline manually
+
+```bash
+# 1. Sync rides
+curl -X POST http://localhost:8080/api/sync
+
+# 2. Generate report for a specific week
+curl -X POST http://localhost:8080/api/report \
+  -H 'Content-Type: application/json' \
+  -d '{"type":"weekly_report","week_start":"2026-03-23"}'
+# → {"id":1}
+
+# 3. Send via Telegram
+curl -X POST http://localhost:8080/api/report/send \
+  -H 'Content-Type: application/json' \
+  -d '{"report_id":1}'
+# → {"status":"sent"}
+```
+
 ## Development
 
 ```bash

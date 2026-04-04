@@ -15,7 +15,8 @@ type Config struct {
 	TelegramChatID   string
 
 	// Anthropic
-	AnthropicAPIKey string
+	AnthropicAPIKey   string
+	AnthropicModel    string
 
 	// Server
 	ServerAddr         string
@@ -23,6 +24,11 @@ type Config struct {
 	DatabasePath       string
 	FITFilesPath       string
 	AthleteProfilePath string
+
+	// Scheduler cron expressions (empty = disabled)
+	CronSync          string // Wahoo sync, e.g. "0 */4 * * *"
+	CronFITProcessing string // FIT file processing, e.g. "*/15 * * * *"
+	CronWeeklyReport  string // Weekly report + plan + delivery, e.g. "0 20 * * 0"
 }
 
 // Load reads configuration from environment variables, applying defaults where defined.
@@ -37,12 +43,17 @@ func Load() (*Config, error) {
 		TelegramChatID:   os.Getenv("TELEGRAM_CHAT_ID"),
 
 		AnthropicAPIKey: os.Getenv("ANTHROPIC_API_KEY"),
+		AnthropicModel:  envOrDefault("ANTHROPIC_MODEL", "claude-sonnet-4-20250514"),
 
 		ServerAddr:         envOrDefault("SERVER_ADDR", ":8080"),
 		BaseURL:            os.Getenv("BASE_URL"),
 		DatabasePath:       envOrDefault("DATABASE_PATH", "/data/cycling.db"),
 		FITFilesPath:       envOrDefault("FIT_FILES_PATH", "/data/fit_files/"),
 		AthleteProfilePath: envOrDefault("ATHLETE_PROFILE_PATH", "/data/athlete-profile.md"),
+
+		CronSync:          os.Getenv("CRON_SYNC"),
+		CronFITProcessing: os.Getenv("CRON_FIT_PROCESSING"),
+		CronWeeklyReport:  os.Getenv("CRON_WEEKLY_REPORT"),
 	}, nil
 }
 

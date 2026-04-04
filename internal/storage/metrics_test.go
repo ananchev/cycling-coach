@@ -8,7 +8,7 @@ import (
 
 func insertTestWorkout(t *testing.T, db *sql.DB, wahooID string) int64 {
 	t.Helper()
-	id, err := UpsertWorkout(db, &Workout{
+	id, _, err := UpsertWorkout(db, &Workout{
 		WahooID:   wahooID,
 		StartedAt: time.Date(2026, 3, 10, 9, 0, 0, 0, time.UTC),
 		Source:    "api",

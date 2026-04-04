@@ -3,6 +3,7 @@ package storage
 import (
 	"database/sql"
 	"fmt"
+	"strings"
 
 	_ "github.com/mattn/go-sqlite3"
 )
@@ -59,6 +60,11 @@ func migrate(db *sql.DB) error {
 
 	for _, stmt := range migrations {
 		if _, err := tx.Exec(stmt); err != nil {
+			// ALTER TABLE ADD COLUMN fails if the column already exists.
+			// SQLite has no IF NOT EXISTS variant, so we tolerate duplicate-column errors.
+			if strings.Contains(err.Error(), "duplicate column name") {
+				continue
+			}
 			return fmt.Errorf("migrate: exec: %w", err)
 		}
 	}
@@ -68,6 +74,70 @@ func migrate(db *sql.DB) error {
 	}
 	return nil
 }
+
+const seedWorkoutTypes = `INSERT OR IGNORE INTO workout_types(id, description, location, family) VALUES
+(0,'Biking','outdoor','biking'),
+(1,'Running','outdoor','running'),
+(2,'FE','indoor',''),
+(3,'Running Track','outdoor','track'),
+(4,'Running Trail','outdoor','trail'),
+(5,'Running Treadmill','indoor','running'),
+(6,'Walking','outdoor','walking'),
+(7,'Walking Speed','outdoor','walking'),
+(8,'Walking Nordic','outdoor','walking'),
+(9,'Hiking','outdoor','walking'),
+(10,'Mountaineering','outdoor','walking'),
+(11,'Biking Cyclocross','outdoor','biking'),
+(12,'Biking Indoor','indoor','biking'),
+(13,'Biking Mountain','outdoor','biking'),
+(14,'Biking Recumbent','outdoor','biking'),
+(15,'Biking Road','outdoor','biking'),
+(16,'Biking Track','outdoor','biking'),
+(17,'Biking Motorcycling','outdoor','biking'),
+(18,'FE General','indoor',''),
+(19,'FE Treadmill','indoor',''),
+(20,'FE Elliptical','indoor','gym'),
+(21,'FE Bike','indoor',''),
+(22,'FE Rower','indoor','gym'),
+(23,'FE Climber','indoor',''),
+(25,'Swimming Lap','indoor','swimming'),
+(26,'Swimming Open Water','outdoor','swimming'),
+(27,'Snowboarding','outdoor','snow_sport'),
+(28,'Skiing','outdoor','snow_sport'),
+(29,'Skiing Downhill','outdoor','snow_sport'),
+(30,'Skiing Cross Country','outdoor','snow_sport'),
+(31,'Skating','outdoor','skating'),
+(32,'Skating Ice','indoor','skating'),
+(33,'Skating Inline','indoor','skating'),
+(34,'Long Boarding','outdoor','skating'),
+(35,'Sailing','outdoor','water_sports'),
+(36,'Windsurfing','outdoor','water_sports'),
+(37,'Canoeing','outdoor','water_sports'),
+(38,'Kayaking','outdoor','water_sports'),
+(39,'Rowing','outdoor','water_sports'),
+(40,'Kiteboarding','outdoor','water_sports'),
+(41,'Stand Up Paddle Board','outdoor','water_sports'),
+(42,'Workout','indoor','gym'),
+(43,'Cardio Class','indoor','gym'),
+(44,'Stair Climber','indoor','gym'),
+(45,'Wheelchair','outdoor','other'),
+(46,'Golfing','outdoor','other'),
+(47,'Other','outdoor','other'),
+(49,'Biking Indoor Cycling Class','indoor','biking'),
+(56,'Walking Treadmill','indoor','walking'),
+(61,'Biking Indoor Trainer','indoor','biking'),
+(62,'Multisport','outdoor',''),
+(63,'Transition','outdoor',''),
+(64,'E-Biking','outdoor','biking'),
+(65,'TICKR Offline','outdoor',''),
+(66,'Yoga','indoor','gym'),
+(67,'Running Race','outdoor','running'),
+(68,'Biking Indoor Virtual','indoor','biking'),
+(69,'Mental Strength','indoor','other'),
+(70,'Handcycling','outdoor','biking'),
+(71,'Running Indoor Virtual','indoor','running'),
+(255,'Unknown','','')
+`
 
 var migrations = []string{
 	`CREATE TABLE IF NOT EXISTS wahoo_tokens (
@@ -154,4 +224,50 @@ var migrations = []string{
 
 	// Unique constraint on reports(type, week_start) required for ON CONFLICT upserts.
 	`CREATE UNIQUE INDEX IF NOT EXISTS idx_reports_type_week ON reports(type, week_start)`,
+
+	// report_deliveries tracks outbound delivery attempts per report per channel.
+	// UNIQUE(report_id, channel) enforces one delivery record per report, enabling
+	// idempotent send logic: INSERT OR IGNORE to claim, then check status before sending.
+	`CREATE TABLE IF NOT EXISTS report_deliveries (
+		id              INTEGER PRIMARY KEY AUTOINCREMENT,
+		report_id       INTEGER NOT NULL REFERENCES reports(id),
+		channel         TEXT NOT NULL DEFAULT 'telegram',
+		status          TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending','sent','failed')),
+		telegram_msg_id INTEGER,
+		attempted_at    DATETIME,
+		sent_at         DATETIME,
+		error           TEXT,
+		created_at      DATETIME DEFAULT CURRENT_TIMESTAMP,
+		UNIQUE(report_id, channel)
+	)`,
+	`CREATE INDEX IF NOT EXISTS idx_deliveries_status ON report_deliveries(status)`,
+
+	// Migration: add narrative_text column to reports for full plan comparison.
+	`ALTER TABLE reports ADD COLUMN narrative_text TEXT`,
+
+	// Workout types reference table (Wahoo master data).
+	`CREATE TABLE IF NOT EXISTS workout_types (
+		id          INTEGER PRIMARY KEY,
+		description TEXT NOT NULL,
+		location    TEXT NOT NULL DEFAULT '',
+		family      TEXT NOT NULL DEFAULT ''
+	)`,
+
+	// Add workout_type_id integer column to workouts for proper FK to workout_types.
+	`ALTER TABLE workouts ADD COLUMN workout_type_id INTEGER`,
+
+	// Seed workout types master data.
+	seedWorkoutTypes,
+
+	// Backfill workout_type_id from existing workout_type text where possible.
+	// Handles "wahoo_type_<id>" format and known legacy names.
+	`UPDATE workouts SET workout_type_id = CAST(REPLACE(workout_type, 'wahoo_type_', '') AS INTEGER)
+	 WHERE workout_type_id IS NULL AND workout_type LIKE 'wahoo_type_%'`,
+
+	// Migration: add power zone timeline JSON to ride_metrics.
+	`ALTER TABLE ride_metrics ADD COLUMN zone_timeline TEXT`,
+
+	// Migration: add body composition columns to athlete_notes.
+	`ALTER TABLE athlete_notes ADD COLUMN body_fat_pct REAL`,
+	`ALTER TABLE athlete_notes ADD COLUMN muscle_mass_kg REAL`,
 }

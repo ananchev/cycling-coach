@@ -26,12 +26,15 @@ func TestUpsertWorkout_InsertAndGet(t *testing.T) {
 	db := openTestDB(t)
 	w := newTestWorkout("wahoo-001")
 
-	id, err := UpsertWorkout(db, w)
+	id, inserted, err := UpsertWorkout(db, w)
 	if err != nil {
 		t.Fatalf("UpsertWorkout: %v", err)
 	}
 	if id == 0 {
 		t.Fatal("expected non-zero id")
+	}
+	if !inserted {
+		t.Error("expected inserted=true on first insert")
 	}
 
 	got, err := GetWorkoutByWahooID(db, "wahoo-001")
@@ -53,13 +56,20 @@ func TestUpsertWorkout_Idempotent(t *testing.T) {
 	db := openTestDB(t)
 	w := newTestWorkout("wahoo-002")
 
-	id1, err := UpsertWorkout(db, w)
+	id1, inserted1, err := UpsertWorkout(db, w)
 	if err != nil {
 		t.Fatalf("first UpsertWorkout: %v", err)
 	}
-	id2, err := UpsertWorkout(db, w)
+	if !inserted1 {
+		t.Error("first upsert should report inserted=true")
+	}
+
+	id2, inserted2, err := UpsertWorkout(db, w)
 	if err != nil {
 		t.Fatalf("second UpsertWorkout: %v", err)
+	}
+	if inserted2 {
+		t.Error("second upsert should report inserted=false")
 	}
 	if id1 != id2 {
 		t.Errorf("expected same id on repeat upsert, got %d and %d", id1, id2)
@@ -77,7 +87,7 @@ func TestGetWorkoutByWahooID_NotFound(t *testing.T) {
 func TestMarkWorkoutProcessed(t *testing.T) {
 	db := openTestDB(t)
 	w := newTestWorkout("wahoo-003")
-	id, err := UpsertWorkout(db, w)
+	id, _, err := UpsertWorkout(db, w)
 	if err != nil {
 		t.Fatalf("UpsertWorkout: %v", err)
 	}
@@ -99,13 +109,13 @@ func TestListUnprocessedWorkouts(t *testing.T) {
 	db := openTestDB(t)
 
 	for _, id := range []string{"w-a", "w-b", "w-c"} {
-		if _, err := UpsertWorkout(db, newTestWorkout(id)); err != nil {
+		if _, _, err := UpsertWorkout(db, newTestWorkout(id)); err != nil {
 			t.Fatalf("UpsertWorkout %s: %v", id, err)
 		}
 	}
 
 	// Mark one processed.
-	wid, _ := UpsertWorkout(db, newTestWorkout("w-a"))
+	wid, _, _ := UpsertWorkout(db, newTestWorkout("w-a"))
 	if err := MarkWorkoutProcessed(db, wid); err != nil {
 		t.Fatalf("MarkWorkoutProcessed: %v", err)
 	}
@@ -128,7 +138,7 @@ func TestListWorkoutsByDateRange(t *testing.T) {
 			StartedAt: time.Date(2026, 3, day, 9, 0, 0, 0, time.UTC),
 			Source:    "api",
 		}
-		if _, err := UpsertWorkout(db, w); err != nil {
+		if _, _, err := UpsertWorkout(db, w); err != nil {
 			t.Fatalf("UpsertWorkout: %v", err)
 		}
 	}

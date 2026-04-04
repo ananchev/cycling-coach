@@ -17,22 +17,24 @@ const (
 
 // AthleteNote represents a row in the athlete_notes table.
 type AthleteNote struct {
-	ID        int64
-	Timestamp time.Time
-	Type      NoteType
-	RPE       *int64
-	WeightKG  *float64
-	Note      *string
-	WorkoutID *int64
-	CreatedAt time.Time
+	ID           int64
+	Timestamp    time.Time
+	Type         NoteType
+	RPE          *int64
+	WeightKG     *float64
+	BodyFatPct   *float64
+	MuscleMassKG *float64
+	Note         *string
+	WorkoutID    *int64
+	CreatedAt    time.Time
 }
 
 // InsertNote inserts an athlete note and returns its ID.
 func InsertNote(db *sql.DB, n *AthleteNote) (int64, error) {
 	res, err := db.Exec(`
-		INSERT INTO athlete_notes(timestamp, type, rpe, weight_kg, note, workout_id)
-		VALUES(?, ?, ?, ?, ?, ?)`,
-		n.Timestamp, string(n.Type), n.RPE, n.WeightKG, n.Note, n.WorkoutID,
+		INSERT INTO athlete_notes(timestamp, type, rpe, weight_kg, body_fat_pct, muscle_mass_kg, note, workout_id)
+		VALUES(?, ?, ?, ?, ?, ?, ?, ?)`,
+		n.Timestamp, string(n.Type), n.RPE, n.WeightKG, n.BodyFatPct, n.MuscleMassKG, n.Note, n.WorkoutID,
 	)
 	if err != nil {
 		return 0, fmt.Errorf("storage.InsertNote: %w", err)
@@ -47,7 +49,7 @@ func InsertNote(db *sql.DB, n *AthleteNote) (int64, error) {
 // ListNotesByDateRange returns notes with timestamp in [from, to], ordered by timestamp ASC.
 func ListNotesByDateRange(db *sql.DB, from, to time.Time) ([]AthleteNote, error) {
 	rows, err := db.Query(`
-		SELECT id, timestamp, type, rpe, weight_kg, note, workout_id, created_at
+		SELECT id, timestamp, type, rpe, weight_kg, body_fat_pct, muscle_mass_kg, note, workout_id, created_at
 		FROM athlete_notes
 		WHERE timestamp >= ? AND timestamp <= ?
 		ORDER BY timestamp ASC`,
@@ -63,7 +65,8 @@ func ListNotesByDateRange(db *sql.DB, from, to time.Time) ([]AthleteNote, error)
 		var noteType string
 		err := rows.Scan(
 			&note.ID, &note.Timestamp, &noteType,
-			&note.RPE, &note.WeightKG, &note.Note, &note.WorkoutID, &note.CreatedAt,
+			&note.RPE, &note.WeightKG, &note.BodyFatPct, &note.MuscleMassKG,
+			&note.Note, &note.WorkoutID, &note.CreatedAt,
 		)
 		if err != nil {
 			return nil, fmt.Errorf("storage.ListNotesByDateRange: scan: %w", err)
@@ -75,6 +78,139 @@ func ListNotesByDateRange(db *sql.DB, from, to time.Time) ([]AthleteNote, error)
 		return nil, fmt.Errorf("storage.ListNotesByDateRange: rows: %w", err)
 	}
 	return out, nil
+}
+
+// ListAllNotes returns all notes ordered by timestamp DESC, with optional limit.
+func ListAllNotes(db *sql.DB, limit int) ([]AthleteNote, error) {
+	rows, err := db.Query(`
+		SELECT id, timestamp, type, rpe, weight_kg, body_fat_pct, muscle_mass_kg, note, workout_id, created_at
+		FROM athlete_notes
+		ORDER BY timestamp DESC
+		LIMIT ?`, limit)
+	if err != nil {
+		return nil, fmt.Errorf("storage.ListAllNotes: %w", err)
+	}
+	defer rows.Close()
+
+	var out []AthleteNote
+	for rows.Next() {
+		var note AthleteNote
+		var noteType string
+		err := rows.Scan(
+			&note.ID, &note.Timestamp, &noteType,
+			&note.RPE, &note.WeightKG, &note.BodyFatPct, &note.MuscleMassKG,
+			&note.Note, &note.WorkoutID, &note.CreatedAt,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("storage.ListAllNotes: scan: %w", err)
+		}
+		note.Type = NoteType(noteType)
+		out = append(out, note)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("storage.ListAllNotes: rows: %w", err)
+	}
+	return out, nil
+}
+
+// ListBodyMetrics returns weight-type notes that have at least one body metric, ordered by timestamp ASC.
+func ListBodyMetrics(db *sql.DB, limit int) ([]AthleteNote, error) {
+	rows, err := db.Query(`
+		SELECT id, timestamp, type, rpe, weight_kg, body_fat_pct, muscle_mass_kg, note, workout_id, created_at
+		FROM athlete_notes
+		WHERE type = 'weight' AND (weight_kg IS NOT NULL OR body_fat_pct IS NOT NULL OR muscle_mass_kg IS NOT NULL)
+		ORDER BY timestamp ASC
+		LIMIT ?`, limit)
+	if err != nil {
+		return nil, fmt.Errorf("storage.ListBodyMetrics: %w", err)
+	}
+	defer rows.Close()
+
+	var out []AthleteNote
+	for rows.Next() {
+		var note AthleteNote
+		var noteType string
+		err := rows.Scan(
+			&note.ID, &note.Timestamp, &noteType,
+			&note.RPE, &note.WeightKG, &note.BodyFatPct, &note.MuscleMassKG,
+			&note.Note, &note.WorkoutID, &note.CreatedAt,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("storage.ListBodyMetrics: scan: %w", err)
+		}
+		note.Type = NoteType(noteType)
+		out = append(out, note)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("storage.ListBodyMetrics: rows: %w", err)
+	}
+	return out, nil
+}
+
+// ListNotesByWorkout returns notes linked to a specific workout, ordered by timestamp ASC.
+// If noteType is non-empty, only notes of that type are returned.
+func ListNotesByWorkout(db *sql.DB, workoutID int64, noteType string) ([]AthleteNote, error) {
+	query := `SELECT id, timestamp, type, rpe, weight_kg, body_fat_pct, muscle_mass_kg, note, workout_id, created_at
+		FROM athlete_notes
+		WHERE workout_id = ?`
+	args := []any{workoutID}
+	if noteType != "" {
+		query += " AND type = ?"
+		args = append(args, noteType)
+	}
+	query += " ORDER BY timestamp ASC"
+	rows, err := db.Query(query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("storage.ListNotesByWorkout: %w", err)
+	}
+	defer rows.Close()
+
+	var out []AthleteNote
+	for rows.Next() {
+		var note AthleteNote
+		var noteType string
+		err := rows.Scan(
+			&note.ID, &note.Timestamp, &noteType,
+			&note.RPE, &note.WeightKG, &note.BodyFatPct, &note.MuscleMassKG,
+			&note.Note, &note.WorkoutID, &note.CreatedAt,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("storage.ListNotesByWorkout: scan: %w", err)
+		}
+		note.Type = NoteType(noteType)
+		out = append(out, note)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("storage.ListNotesByWorkout: rows: %w", err)
+	}
+	return out, nil
+}
+
+// UpdateNote updates an existing note's mutable fields.
+func UpdateNote(db *sql.DB, n *AthleteNote) error {
+	_, err := db.Exec(`
+		UPDATE athlete_notes
+		SET type = ?, rpe = ?, weight_kg = ?, body_fat_pct = ?, muscle_mass_kg = ?, note = ?
+		WHERE id = ?`,
+		string(n.Type), n.RPE, n.WeightKG, n.BodyFatPct, n.MuscleMassKG, n.Note, n.ID,
+	)
+	if err != nil {
+		return fmt.Errorf("storage.UpdateNote: %w", err)
+	}
+	return nil
+}
+
+// DeleteNote deletes a note by ID.
+func DeleteNote(db *sql.DB, id int64) error {
+	res, err := db.Exec(`DELETE FROM athlete_notes WHERE id = ?`, id)
+	if err != nil {
+		return fmt.Errorf("storage.DeleteNote: %w", err)
+	}
+	n, _ := res.RowsAffected()
+	if n == 0 {
+		return sql.ErrNoRows
+	}
+	return nil
 }
 
 // LinkNoteToWorkout associates a note with a workout by setting workout_id.

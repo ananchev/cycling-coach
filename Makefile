@@ -13,7 +13,7 @@ logs:
 	docker compose logs -f
 
 dev:
-	go run ./cmd/server
+	go run ./cmd/server || true
 
 test:
 	go test ./...
