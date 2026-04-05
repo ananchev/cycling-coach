@@ -130,6 +130,7 @@ type WorkoutWithMetrics struct {
 	Source      string
 	Processed   bool
 	FITFilePath *string
+	AvgCadence  *float64
 	// Metrics (nil when not yet computed)
 	AvgPower        *float64
 	AvgHR           *float64
@@ -147,7 +148,12 @@ type WorkoutWithMetrics struct {
 	HRZ3Pct         *float64
 	HRZ4Pct         *float64
 	HRZ5Pct         *float64
+	CadLT70Pct      *float64
+	Cad70To85Pct    *float64
+	Cad85To100Pct   *float64
+	CadGE100Pct     *float64
 	ZoneTimeline    *string
+	HRZoneTimeline  *string
 	// Notes linked to this workout, split by type
 	RideNotes    *string // type='ride' notes concatenated
 	GeneralNotes *string // type='note' notes concatenated
@@ -158,11 +164,12 @@ func ListWorkoutsWithMetrics(db *sql.DB, from, to time.Time, limit int) ([]Worko
 	query := `
 		SELECT w.id, w.wahoo_id, w.started_at, w.duration_sec,
 		       COALESCE(wt.description, w.workout_type),
-		       w.source, w.processed, w.fit_file_path,
+		       w.source, w.processed, w.fit_file_path, w.avg_cadence,
 		       m.avg_power, m.avg_hr, m.normalized_power, m.tss, m.hr_drift_pct, m.intensity_factor,
 		       m.pwr_z1_pct, m.pwr_z2_pct, m.pwr_z3_pct, m.pwr_z4_pct, m.pwr_z5_pct,
 		       m.hr_z1_pct, m.hr_z2_pct, m.hr_z3_pct, m.hr_z4_pct, m.hr_z5_pct,
-		       m.zone_timeline,
+		       m.cad_lt70_pct, m.cad_70_85_pct, m.cad_85_100_pct, m.cad_ge100_pct,
+		       m.zone_timeline, m.hr_zone_timeline,
 		       GROUP_CONCAT(CASE WHEN n.type='ride' THEN n.note END, ' | '),
 		       GROUP_CONCAT(CASE WHEN n.type='note' THEN n.note END, ' | ')
 		FROM workouts w
@@ -193,11 +200,12 @@ func ListWorkoutsWithMetrics(db *sql.DB, from, to time.Time, limit int) ([]Worko
 		var wm WorkoutWithMetrics
 		if err := rows.Scan(
 			&wm.ID, &wm.WahooID, &wm.StartedAt, &wm.DurationSec, &wm.WorkoutType,
-			&wm.Source, &wm.Processed, &wm.FITFilePath,
+			&wm.Source, &wm.Processed, &wm.FITFilePath, &wm.AvgCadence,
 			&wm.AvgPower, &wm.AvgHR, &wm.NormalizedPower, &wm.TSS, &wm.HRDriftPct, &wm.IntensityFactor,
 			&wm.PwrZ1Pct, &wm.PwrZ2Pct, &wm.PwrZ3Pct, &wm.PwrZ4Pct, &wm.PwrZ5Pct,
 			&wm.HRZ1Pct, &wm.HRZ2Pct, &wm.HRZ3Pct, &wm.HRZ4Pct, &wm.HRZ5Pct,
-			&wm.ZoneTimeline,
+			&wm.CadLT70Pct, &wm.Cad70To85Pct, &wm.Cad85To100Pct, &wm.CadGE100Pct,
+			&wm.ZoneTimeline, &wm.HRZoneTimeline,
 			&wm.RideNotes, &wm.GeneralNotes,
 		); err != nil {
 			return nil, fmt.Errorf("storage.ListWorkoutsWithMetrics: scan: %w", err)
@@ -212,11 +220,12 @@ func GetWorkoutWithMetricsByID(db *sql.DB, id int64) (*WorkoutWithMetrics, error
 	row := db.QueryRow(`
 		SELECT w.id, w.wahoo_id, w.started_at, w.duration_sec,
 		       COALESCE(wt.description, w.workout_type),
-		       w.source, w.processed, w.fit_file_path,
+		       w.source, w.processed, w.fit_file_path, w.avg_cadence,
 		       m.avg_power, m.avg_hr, m.normalized_power, m.tss, m.hr_drift_pct, m.intensity_factor,
 		       m.pwr_z1_pct, m.pwr_z2_pct, m.pwr_z3_pct, m.pwr_z4_pct, m.pwr_z5_pct,
 		       m.hr_z1_pct, m.hr_z2_pct, m.hr_z3_pct, m.hr_z4_pct, m.hr_z5_pct,
-		       m.zone_timeline,
+		       m.cad_lt70_pct, m.cad_70_85_pct, m.cad_85_100_pct, m.cad_ge100_pct,
+		       m.zone_timeline, m.hr_zone_timeline,
 		       GROUP_CONCAT(CASE WHEN n.type='ride' THEN n.note END, ' | '),
 		       GROUP_CONCAT(CASE WHEN n.type='note' THEN n.note END, ' | ')
 		FROM workouts w
@@ -229,11 +238,12 @@ func GetWorkoutWithMetricsByID(db *sql.DB, id int64) (*WorkoutWithMetrics, error
 	var wm WorkoutWithMetrics
 	if err := row.Scan(
 		&wm.ID, &wm.WahooID, &wm.StartedAt, &wm.DurationSec, &wm.WorkoutType,
-		&wm.Source, &wm.Processed, &wm.FITFilePath,
+		&wm.Source, &wm.Processed, &wm.FITFilePath, &wm.AvgCadence,
 		&wm.AvgPower, &wm.AvgHR, &wm.NormalizedPower, &wm.TSS, &wm.HRDriftPct, &wm.IntensityFactor,
 		&wm.PwrZ1Pct, &wm.PwrZ2Pct, &wm.PwrZ3Pct, &wm.PwrZ4Pct, &wm.PwrZ5Pct,
 		&wm.HRZ1Pct, &wm.HRZ2Pct, &wm.HRZ3Pct, &wm.HRZ4Pct, &wm.HRZ5Pct,
-		&wm.ZoneTimeline,
+		&wm.CadLT70Pct, &wm.Cad70To85Pct, &wm.Cad85To100Pct, &wm.CadGE100Pct,
+		&wm.ZoneTimeline, &wm.HRZoneTimeline,
 		&wm.RideNotes, &wm.GeneralNotes,
 	); err != nil {
 		return nil, fmt.Errorf("storage.GetWorkoutWithMetricsByID: %w", err)

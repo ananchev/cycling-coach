@@ -2,6 +2,7 @@ package analysis
 
 import (
 	"encoding/json"
+	"math"
 	"testing"
 	"time"
 
@@ -20,9 +21,9 @@ func makeRecords(count int, hr uint8, power uint16, cadence uint8) []fitpkg.Reco
 	for i := range records {
 		records[i] = fitpkg.Record{
 			Timestamp: time.Now().Add(time.Duration(i) * time.Second),
-			HeartRate:  hr,
-			Power:      power,
-			Cadence:    cadence,
+			HeartRate: hr,
+			Power:     power,
+			Cadence:   cadence,
 		}
 	}
 	return records
@@ -354,5 +355,72 @@ func TestZoneTimelineJSON_RoundTrip(t *testing.T) {
 	}
 	if len(segs) != 1 {
 		t.Errorf("got %d segments from JSON, want 1", len(segs))
+	}
+}
+
+func TestComputeHRZoneTimeline_SteadyZ2(t *testing.T) {
+	// 300 seconds at 130 bpm = all Z2 (HRZ2Max=140) -> single segment.
+	records := makeRecords(300, 130, 150, 80)
+	segs := ComputeHRZoneTimeline(records, testZones, 60)
+
+	if len(segs) != 1 {
+		t.Fatalf("got %d segments, want 1", len(segs))
+	}
+	if segs[0].Zone != 2 {
+		t.Errorf("zone = %d, want 2", segs[0].Zone)
+	}
+	if segs[0].DurationMin < 4.9 || segs[0].DurationMin > 5.1 {
+		t.Errorf("duration = %.1f min, want ~5.0", segs[0].DurationMin)
+	}
+}
+
+func TestHRZoneTimelineJSON_RoundTrip(t *testing.T) {
+	records := makeRecords(300, 130, 150, 80)
+	jsonStr := HRZoneTimelineJSON(records, testZones)
+	if jsonStr == "" {
+		t.Fatal("got empty JSON, want non-empty")
+	}
+
+	var segs []HRZoneSegment
+	if err := json.Unmarshal([]byte(jsonStr), &segs); err != nil {
+		t.Fatalf("invalid JSON: %v", err)
+	}
+	if len(segs) != 1 {
+		t.Errorf("got %d segments from JSON, want 1", len(segs))
+	}
+}
+
+func TestComputeCadenceDistribution(t *testing.T) {
+	var records []fitpkg.Record
+	base := time.Now()
+	for i := 0; i < 60; i++ {
+		records = append(records, fitpkg.Record{Timestamp: base.Add(time.Duration(i) * time.Second), HeartRate: 130, Power: 150, Cadence: 60})
+	}
+	for i := 60; i < 120; i++ {
+		records = append(records, fitpkg.Record{Timestamp: base.Add(time.Duration(i) * time.Second), HeartRate: 130, Power: 150, Cadence: 75})
+	}
+	for i := 120; i < 180; i++ {
+		records = append(records, fitpkg.Record{Timestamp: base.Add(time.Duration(i) * time.Second), HeartRate: 130, Power: 150, Cadence: 90})
+	}
+	for i := 180; i < 240; i++ {
+		records = append(records, fitpkg.Record{Timestamp: base.Add(time.Duration(i) * time.Second), HeartRate: 130, Power: 150, Cadence: 105})
+	}
+
+	m := Compute(&fitpkg.ParsedFIT{
+		Session: fitpkg.Session{DurationSec: 240},
+		Records: records,
+	}, testZones)
+
+	if math.Abs(m.CadLT70Pct-25) > 0.1 {
+		t.Errorf("CadLT70Pct = %.1f, want 25", m.CadLT70Pct)
+	}
+	if math.Abs(m.Cad70To85Pct-25) > 0.1 {
+		t.Errorf("Cad70To85Pct = %.1f, want 25", m.Cad70To85Pct)
+	}
+	if math.Abs(m.Cad85To100Pct-25) > 0.1 {
+		t.Errorf("Cad85To100Pct = %.1f, want 25", m.Cad85To100Pct)
+	}
+	if math.Abs(m.CadGE100Pct-25) > 0.1 {
+		t.Errorf("CadGE100Pct = %.1f, want 25", m.CadGE100Pct)
 	}
 }

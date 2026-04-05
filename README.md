@@ -68,7 +68,7 @@ flowchart LR
 1. Wahoo OAuth is completed through `/wahoo/authorize` and `/wahoo/callback`.
 2. Workouts arrive through the Wahoo webhook and optional manual/scheduled sync.
 3. Workout rows are stored in SQLite and FIT files are downloaded to disk when available.
-4. FIT processing computes per-ride metrics such as NP, IF, TSS, TRIMP, HR drift, decoupling, zone distribution, and a power-zone timeline.
+4. FIT processing computes per-ride metrics such as NP, IF, TSS, TRIMP, HR drift, decoupling, power/HR zone distribution, cadence distribution, and power/HR zone timelines.
 5. Training reports and plans are assembled from workouts, computed metrics, notes, and the athlete profile markdown.
 6. Claude returns structured JSON with a Telegram-sized summary plus a full narrative.
 7. The app renders HTML, stores it in the database, serves it at `/reports/{id}` or `/plans/{id}`, and can send the summary + link to Telegram.
@@ -90,6 +90,13 @@ flowchart LR
 - Per-ride metrics stored in `ride_metrics`
 - Reprocessing, FIT reset, and FIT ignore flows through the admin/API layer
 - FIT time-series CSV export from stored FIT files
+- Per-ride detail for Claude now includes:
+  - summary-row metrics including average cadence
+  - power zone percentages
+  - HR zone percentages
+  - cadence distribution bands: `<70`, `70-85`, `85-100`, `100+`
+  - power zone timeline
+  - HR zone timeline
 
 ### Reporting
 

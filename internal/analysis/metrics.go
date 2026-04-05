@@ -60,10 +60,18 @@ func LoadZoneConfig(db *sql.DB) (ZoneConfig, error) {
 
 // ZoneSegment represents a contiguous block of time spent in a single power zone.
 type ZoneSegment struct {
-	Zone       int     `json:"zone"`        // 1–5
-	StartMin   float64 `json:"start_min"`   // minutes from ride start
+	Zone        int     `json:"zone"`      // 1–5
+	StartMin    float64 `json:"start_min"` // minutes from ride start
 	DurationMin float64 `json:"duration_min"`
-	AvgPower   float64 `json:"avg_power"`   // average power in this segment
+	AvgPower    float64 `json:"avg_power"` // average power in this segment
+}
+
+// HRZoneSegment represents a contiguous block of time spent in a single HR zone.
+type HRZoneSegment struct {
+	Zone        int     `json:"zone"`      // 1–5
+	StartMin    float64 `json:"start_min"` // minutes from ride start
+	DurationMin float64 `json:"duration_min"`
+	AvgHR       float64 `json:"avg_hr"` // average HR in this segment
 }
 
 // ComputeZoneTimeline derives contiguous power zone segments from per-second records.
@@ -148,6 +156,82 @@ func ComputeZoneTimeline(records []fitpkg.Record, z ZoneConfig, minSegmentSec in
 	return out
 }
 
+// ComputeHRZoneTimeline derives contiguous HR zone segments from per-second records.
+// Segments shorter than minSegmentSec are merged into the surrounding segment to avoid
+// noise from brief HR fluctuations.
+func ComputeHRZoneTimeline(records []fitpkg.Record, z ZoneConfig, minSegmentSec int) []HRZoneSegment {
+	if len(records) == 0 {
+		return nil
+	}
+
+	type classified struct {
+		zone int
+		hr   float64
+	}
+	raw := make([]classified, 0, len(records))
+	for _, r := range records {
+		if !r.ValidHR() {
+			continue
+		}
+		zi := hrZoneIndex(int(r.HeartRate), z) + 1 // 1-based
+		raw = append(raw, classified{zone: zi, hr: float64(r.HeartRate)})
+	}
+	if len(raw) < minSegmentSec {
+		return nil
+	}
+
+	type rawSeg struct {
+		zone     int
+		startIdx int
+		endIdx   int // exclusive
+		hrSum    float64
+	}
+	segs := []rawSeg{{zone: raw[0].zone, startIdx: 0, endIdx: 1, hrSum: raw[0].hr}}
+	for i := 1; i < len(raw); i++ {
+		cur := &segs[len(segs)-1]
+		if raw[i].zone == cur.zone {
+			cur.endIdx = i + 1
+			cur.hrSum += raw[i].hr
+		} else {
+			segs = append(segs, rawSeg{zone: raw[i].zone, startIdx: i, endIdx: i + 1, hrSum: raw[i].hr})
+		}
+	}
+
+	for changed := true; changed; {
+		changed = false
+		merged := make([]rawSeg, 0, len(segs))
+		for _, s := range segs {
+			dur := s.endIdx - s.startIdx
+			if dur < minSegmentSec && len(merged) > 0 {
+				merged[len(merged)-1].endIdx = s.endIdx
+				merged[len(merged)-1].hrSum += s.hrSum
+				changed = true
+			} else {
+				if len(merged) > 0 && merged[len(merged)-1].zone == s.zone {
+					merged[len(merged)-1].endIdx = s.endIdx
+					merged[len(merged)-1].hrSum += s.hrSum
+					changed = true
+				} else {
+					merged = append(merged, s)
+				}
+			}
+		}
+		segs = merged
+	}
+
+	out := make([]HRZoneSegment, 0, len(segs))
+	for _, s := range segs {
+		n := float64(s.endIdx - s.startIdx)
+		out = append(out, HRZoneSegment{
+			Zone:        s.zone,
+			StartMin:    float64(s.startIdx) / 60.0,
+			DurationMin: n / 60.0,
+			AvgHR:       s.hrSum / n,
+		})
+	}
+	return out
+}
+
 // ZoneTimelineJSON computes the zone timeline and returns it as a JSON string.
 // Returns empty string if no timeline could be computed.
 func ZoneTimelineJSON(records []fitpkg.Record, z ZoneConfig) string {
@@ -162,24 +246,40 @@ func ZoneTimelineJSON(records []fitpkg.Record, z ZoneConfig) string {
 	return string(b)
 }
 
+// HRZoneTimelineJSON computes the HR zone timeline and returns it as a JSON string.
+// Returns empty string if no timeline could be computed.
+func HRZoneTimelineJSON(records []fitpkg.Record, z ZoneConfig) string {
+	segs := ComputeHRZoneTimeline(records, z, 60) // 60-second minimum segment
+	if len(segs) == 0 {
+		return ""
+	}
+	b, err := json.Marshal(segs)
+	if err != nil {
+		return ""
+	}
+	return string(b)
+}
+
 // ComputedMetrics holds per-ride derived metrics.
 type ComputedMetrics struct {
-	DurationMin      float64
-	AvgHR            float64
-	MaxHR            float64
-	AvgPower         float64
-	MaxPower         float64
-	AvgCadence       float64
-	NormalizedPower  float64
-	IntensityFactor  float64
-	TSS              float64
-	TRIMP            float64
-	EfficiencyFactor float64
-	HRDriftPct       float64
-	DecouplingPct    float64
-	HRZ1Pct, HRZ2Pct, HRZ3Pct, HRZ4Pct, HRZ5Pct        float64
-	PwrZ1Pct, PwrZ2Pct, PwrZ3Pct, PwrZ4Pct, PwrZ5Pct   float64
-	ZoneTimeline string // JSON array of ZoneSegment
+	DurationMin                                          float64
+	AvgHR                                                float64
+	MaxHR                                                float64
+	AvgPower                                             float64
+	MaxPower                                             float64
+	AvgCadence                                           float64
+	NormalizedPower                                      float64
+	IntensityFactor                                      float64
+	TSS                                                  float64
+	TRIMP                                                float64
+	EfficiencyFactor                                     float64
+	HRDriftPct                                           float64
+	DecouplingPct                                        float64
+	HRZ1Pct, HRZ2Pct, HRZ3Pct, HRZ4Pct, HRZ5Pct          float64
+	PwrZ1Pct, PwrZ2Pct, PwrZ3Pct, PwrZ4Pct, PwrZ5Pct     float64
+	CadLT70Pct, Cad70To85Pct, Cad85To100Pct, CadGE100Pct float64
+	ZoneTimeline                                         string // JSON array of ZoneSegment
+	HRZoneTimeline                                       string // JSON array of HRZoneSegment
 }
 
 const hrRest = 50 // assumed resting HR for TRIMP; no config key yet
@@ -197,16 +297,17 @@ func Compute(p *fitpkg.ParsedFIT, z ZoneConfig) ComputedMetrics {
 
 	// Per-record aggregates.
 	var (
-		hrSum, hrN       float64
-		pwrSum, pwrN     float64
-		cadSum, cadN     float64
-		maxHR, maxPower  float64
-		hrZone           [5]int
-		pwrZone          [5]int
-		totalHRRecs      int
-		totalPwrRecs     int
-		totalCadRecs     int
-		trimp            float64
+		hrSum, hrN      float64
+		pwrSum, pwrN    float64
+		cadSum, cadN    float64
+		maxHR, maxPower float64
+		hrZone          [5]int
+		pwrZone         [5]int
+		cadBands        [4]int
+		totalHRRecs     int
+		totalPwrRecs    int
+		totalCadRecs    int
+		trimp           float64
 	)
 
 	for _, r := range p.Records {
@@ -243,11 +344,12 @@ func Compute(p *fitpkg.ParsedFIT, z ZoneConfig) ComputedMetrics {
 			totalPwrRecs++
 		}
 		if r.ValidCadence() {
-			cadSum += float64(r.Cadence)
+			cad := float64(r.Cadence)
+			cadSum += cad
 			cadN++
+			cadBands[cadenceBandIndex(int(r.Cadence))]++
 			totalCadRecs++
 		}
-		_ = totalCadRecs
 	}
 
 	if hrN > 0 {
@@ -279,6 +381,13 @@ func Compute(p *fitpkg.ParsedFIT, z ZoneConfig) ComputedMetrics {
 		m.PwrZ4Pct = float64(pwrZone[3]) / n * 100
 		m.PwrZ5Pct = float64(pwrZone[4]) / n * 100
 	}
+	if totalCadRecs > 0 {
+		n := float64(totalCadRecs)
+		m.CadLT70Pct = float64(cadBands[0]) / n * 100
+		m.Cad70To85Pct = float64(cadBands[1]) / n * 100
+		m.Cad85To100Pct = float64(cadBands[2]) / n * 100
+		m.CadGE100Pct = float64(cadBands[3]) / n * 100
+	}
 
 	m.TRIMP = trimp
 
@@ -301,8 +410,9 @@ func Compute(p *fitpkg.ParsedFIT, z ZoneConfig) ComputedMetrics {
 	// HR Drift / Pa:HR Decoupling.
 	m.HRDriftPct, m.DecouplingPct = computeDecoupling(p.Records)
 
-	// Power zone timeline.
+	// Power/HR zone timelines.
 	m.ZoneTimeline = ZoneTimelineJSON(p.Records, z)
+	m.HRZoneTimeline = HRZoneTimelineJSON(p.Records, z)
 
 	return m
 }
@@ -346,7 +456,12 @@ func (m ComputedMetrics) ToStorageMetrics(workoutID int64) *storage.RideMetrics 
 		PwrZ3Pct:         p(m.PwrZ3Pct),
 		PwrZ4Pct:         p(m.PwrZ4Pct),
 		PwrZ5Pct:         p(m.PwrZ5Pct),
+		CadLT70Pct:       p(m.CadLT70Pct),
+		Cad70To85Pct:     p(m.Cad70To85Pct),
+		Cad85To100Pct:    p(m.Cad85To100Pct),
+		CadGE100Pct:      p(m.CadGE100Pct),
 		ZoneTimeline:     pStr(m.ZoneTimeline),
+		HRZoneTimeline:   pStr(m.HRZoneTimeline),
 	}
 }
 
@@ -379,6 +494,19 @@ func pwrZoneIndex(pwr int, z ZoneConfig) int {
 		return 3
 	default:
 		return 4
+	}
+}
+
+func cadenceBandIndex(cad int) int {
+	switch {
+	case cad < 70:
+		return 0
+	case cad < 85:
+		return 1
+	case cad < 100:
+		return 2
+	default:
+		return 3
 	}
 }
 

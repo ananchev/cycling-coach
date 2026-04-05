@@ -185,6 +185,7 @@ var migrations = []string{
 		decoupling_pct    REAL,
 		hr_z1_pct REAL, hr_z2_pct REAL, hr_z3_pct REAL, hr_z4_pct REAL, hr_z5_pct REAL,
 		pwr_z1_pct REAL, pwr_z2_pct REAL, pwr_z3_pct REAL, pwr_z4_pct REAL, pwr_z5_pct REAL,
+		cad_lt70_pct REAL, cad_70_85_pct REAL, cad_85_100_pct REAL, cad_ge100_pct REAL,
 		created_at        DATETIME DEFAULT CURRENT_TIMESTAMP
 	)`,
 
@@ -285,6 +286,11 @@ var migrations = []string{
 
 	// Migration: add power zone timeline JSON to ride_metrics.
 	`ALTER TABLE ride_metrics ADD COLUMN zone_timeline TEXT`,
+	`ALTER TABLE ride_metrics ADD COLUMN hr_zone_timeline TEXT`,
+	`ALTER TABLE ride_metrics ADD COLUMN cad_lt70_pct REAL`,
+	`ALTER TABLE ride_metrics ADD COLUMN cad_70_85_pct REAL`,
+	`ALTER TABLE ride_metrics ADD COLUMN cad_85_100_pct REAL`,
+	`ALTER TABLE ride_metrics ADD COLUMN cad_ge100_pct REAL`,
 
 	// Migration: add body composition columns to athlete_notes.
 	`ALTER TABLE athlete_notes ADD COLUMN body_fat_pct REAL`,

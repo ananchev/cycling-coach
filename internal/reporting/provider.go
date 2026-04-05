@@ -39,15 +39,19 @@ type RideSummary struct {
 	DurationMin     *float64
 	AvgPower        *float64
 	AvgHR           *float64
+	AvgCadence      *float64
 	NormalizedPower *float64
 	IntensityFactor *float64
 	HRDriftPct      *float64
 	TSS             *float64
 	// Zone distributions (%)
-	HRZ1Pct, HRZ2Pct, HRZ3Pct, HRZ4Pct, HRZ5Pct    *float64
-	PwrZ1Pct, PwrZ2Pct, PwrZ3Pct, PwrZ4Pct, PwrZ5Pct *float64
+	HRZ1Pct, HRZ2Pct, HRZ3Pct, HRZ4Pct, HRZ5Pct          *float64
+	PwrZ1Pct, PwrZ2Pct, PwrZ3Pct, PwrZ4Pct, PwrZ5Pct     *float64
+	CadLT70Pct, Cad70To85Pct, Cad85To100Pct, CadGE100Pct *float64
 	// Power zone timeline — JSON array of {zone, start_min, duration_min, avg_power}
 	ZoneTimeline *string
+	// HR zone timeline — JSON array of {zone, start_min, duration_min, avg_hr}
+	HRZoneTimeline *string
 }
 
 // NoteSummary is a per-note digest assembled for the report prompt.

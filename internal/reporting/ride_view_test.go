@@ -14,6 +14,7 @@ func TestFormatWorkoutSummaryTable(t *testing.T) {
 	np := 210.0
 	ifv := 0.84
 	avgHR := 142.0
+	avgCad := 84.0
 	drift := 3.2
 	tss := 70.0
 
@@ -26,6 +27,7 @@ func TestFormatWorkoutSummaryTable(t *testing.T) {
 		NormalizedPower: &np,
 		IntensityFactor: &ifv,
 		AvgHR:           &avgHR,
+		AvgCadence:      &avgCad,
 		HRDriftPct:      &drift,
 		TSS:             &tss,
 	})
@@ -38,6 +40,7 @@ func TestFormatWorkoutSummaryTable(t *testing.T) {
 		"210",
 		"0.84",
 		"142",
+		"84",
 		"3.2",
 		"70",
 	} {
@@ -50,32 +53,42 @@ func TestFormatWorkoutSummaryTable(t *testing.T) {
 func TestFormatWorkoutZoneDetail(t *testing.T) {
 	p1, p2, p3, p4, p5 := 5.0, 45.0, 10.0, 35.0, 5.0
 	h1, h2, h3, h4, h5 := 8.0, 50.0, 12.0, 25.0, 5.0
+	c1, c2, c3, c4 := 15.0, 35.0, 40.0, 10.0
 	timeline := `[{"zone":2,"start_min":0,"duration_min":12,"avg_power":155},{"zone":4,"start_min":12,"duration_min":20,"avg_power":240}]`
+	hrTimeline := `[{"zone":2,"start_min":0,"duration_min":12,"avg_hr":132},{"zone":4,"start_min":12,"duration_min":20,"avg_hr":151}]`
 
 	got := FormatWorkoutZoneDetail(&storage.WorkoutWithMetrics{
-		StartedAt:    time.Date(2026, 4, 2, 0, 0, 0, 0, time.UTC),
-		WorkoutType:  ptrString("Biking Indoor"),
-		PwrZ1Pct:     &p1,
-		PwrZ2Pct:     &p2,
-		PwrZ3Pct:     &p3,
-		PwrZ4Pct:     &p4,
-		PwrZ5Pct:     &p5,
-		HRZ1Pct:      &h1,
-		HRZ2Pct:      &h2,
-		HRZ3Pct:      &h3,
-		HRZ4Pct:      &h4,
-		HRZ5Pct:      &h5,
-		ZoneTimeline: &timeline,
+		StartedAt:      time.Date(2026, 4, 2, 0, 0, 0, 0, time.UTC),
+		WorkoutType:    ptrString("Biking Indoor"),
+		PwrZ1Pct:       &p1,
+		PwrZ2Pct:       &p2,
+		PwrZ3Pct:       &p3,
+		PwrZ4Pct:       &p4,
+		PwrZ5Pct:       &p5,
+		HRZ1Pct:        &h1,
+		HRZ2Pct:        &h2,
+		HRZ3Pct:        &h3,
+		HRZ4Pct:        &h4,
+		HRZ5Pct:        &h5,
+		CadLT70Pct:     &c1,
+		Cad70To85Pct:   &c2,
+		Cad85To100Pct:  &c3,
+		CadGE100Pct:    &c4,
+		ZoneTimeline:   &timeline,
+		HRZoneTimeline: &hrTimeline,
 	})
 
 	for _, want := range []string{
 		"### 2026-04-02 Biking Indoor",
 		"Power zones: Z1=5% Z2=45% Z3=10% Z4=35% Z5=5%",
 		"HR zones:    Z1=8% Z2=50% Z3=12% Z4=25% Z5=5%",
+		"Cadence:     <70=15% 70-85=35% 85-100=40% 100+=10%",
 		"Power zone timeline:",
 		"0:00",
 		"Z2",
 		"155W avg",
+		"HR zone timeline:",
+		"132bpm avg",
 	} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("zone detail missing %q:\n%s", want, got)

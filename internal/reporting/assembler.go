@@ -43,6 +43,7 @@ func AssembleInput(ctx context.Context, db *sql.DB, profilePath string, reportTy
 			rs.DurationMin = metrics.DurationMin
 			rs.AvgPower = metrics.AvgPower
 			rs.AvgHR = metrics.AvgHR
+			rs.AvgCadence = metrics.AvgCadence
 			rs.NormalizedPower = metrics.NormalizedPower
 			rs.IntensityFactor = metrics.IntensityFactor
 			rs.HRDriftPct = metrics.HRDriftPct
@@ -57,7 +58,12 @@ func AssembleInput(ctx context.Context, db *sql.DB, profilePath string, reportTy
 			rs.PwrZ3Pct = metrics.PwrZ3Pct
 			rs.PwrZ4Pct = metrics.PwrZ4Pct
 			rs.PwrZ5Pct = metrics.PwrZ5Pct
+			rs.CadLT70Pct = metrics.CadLT70Pct
+			rs.Cad70To85Pct = metrics.Cad70To85Pct
+			rs.Cad85To100Pct = metrics.Cad85To100Pct
+			rs.CadGE100Pct = metrics.CadGE100Pct
 			rs.ZoneTimeline = metrics.ZoneTimeline
+			rs.HRZoneTimeline = metrics.HRZoneTimeline
 		}
 
 		rides = append(rides, rs)
@@ -139,10 +145,10 @@ func BuildPrompt(input *ReportInput) string {
 	if len(input.Rides) == 0 {
 		b.WriteString("No rides recorded in this period.\n\n")
 	} else {
-		b.WriteString("Date       | Type            | Dur(min) | AvgP(W) | NP(W) | IF   | AvgHR | Drift% | TSS\n")
-		b.WriteString("-----------|-----------------|----------|---------|-------|------|-------|--------|-----\n")
+		b.WriteString("Date       | Type            | Dur(min) | AvgP(W) | NP(W) | IF   | AvgHR | AvgCad | Drift% | TSS\n")
+		b.WriteString("-----------|-----------------|----------|---------|-------|------|-------|--------|--------|-----\n")
 		for _, r := range input.Rides {
-			fmt.Fprintf(&b, "%s | %-15s | %s | %s | %s | %s | %s | %s | %s\n",
+			fmt.Fprintf(&b, "%s | %-15s | %s | %s | %s | %s | %s | %s | %s | %s\n",
 				r.Date.Format("2006-01-02"),
 				padOrDash(r.WorkoutType, 15),
 				fmtOptFloat(r.DurationMin, "%.0f"),
@@ -150,6 +156,7 @@ func BuildPrompt(input *ReportInput) string {
 				fmtOptFloat(r.NormalizedPower, "%.0f"),
 				fmtOptFloat(r.IntensityFactor, "%.2f"),
 				fmtOptFloat(r.AvgHR, "%.0f"),
+				fmtOptFloat(r.AvgCadence, "%.0f"),
 				fmtOptFloat(r.HRDriftPct, "%.1f"),
 				fmtOptFloat(r.TSS, "%.0f"),
 			)
@@ -159,8 +166,10 @@ func BuildPrompt(input *ReportInput) string {
 		// Per-ride detail: zone distributions and power zone timeline.
 		for _, r := range input.Rides {
 			hasZones := r.PwrZ1Pct != nil
-			hasTimeline := r.ZoneTimeline != nil && *r.ZoneTimeline != ""
-			if !hasZones && !hasTimeline {
+			hasCadenceDist := r.CadLT70Pct != nil
+			hasPowerTimeline := r.ZoneTimeline != nil && *r.ZoneTimeline != ""
+			hasHRTimeline := r.HRZoneTimeline != nil && *r.HRZoneTimeline != ""
+			if !hasZones && !hasCadenceDist && !hasPowerTimeline && !hasHRTimeline {
 				continue
 			}
 			fmt.Fprintf(&b, "### %s %s\n\n", r.Date.Format("2006-01-02"), r.WorkoutType)
@@ -179,10 +188,20 @@ func BuildPrompt(input *ReportInput) string {
 					b.WriteString("\n")
 				}
 			}
+			if hasCadenceDist {
+				b.WriteString("Cadence:     ")
+				fmt.Fprintf(&b, "<70=%.0f%% 70-85=%.0f%% 85-100=%.0f%% 100+=%.0f%%",
+					derefFloat(r.CadLT70Pct), derefFloat(r.Cad70To85Pct), derefFloat(r.Cad85To100Pct), derefFloat(r.CadGE100Pct))
+				b.WriteString("\n")
+			}
 
-			if hasTimeline {
+			if hasPowerTimeline {
 				b.WriteString("\nPower zone timeline:\n")
 				b.WriteString(formatZoneTimeline(*r.ZoneTimeline))
+			}
+			if hasHRTimeline {
+				b.WriteString("\nHR zone timeline:\n")
+				b.WriteString(formatHRZoneTimeline(*r.HRZoneTimeline))
 			}
 			b.WriteString("\n")
 		}
@@ -305,6 +324,32 @@ func formatZoneTimeline(jsonStr string) string {
 		endS := int((endMin - float64(endM)) * 60)
 		fmt.Fprintf(&sb, "%d:%02d–%d:%02d  Z%d  %.0f min  %.0fW avg\n",
 			startM, startS, endM, endS, s.Zone, s.DurationMin, s.AvgPower)
+	}
+	return sb.String()
+}
+
+// formatHRZoneTimeline converts the JSON HR zone timeline into a human-readable block.
+// Input: [{"zone":2,"start_min":0,"duration_min":12,"avg_hr":132}, ...]
+func formatHRZoneTimeline(jsonStr string) string {
+	type seg struct {
+		Zone        int     `json:"zone"`
+		StartMin    float64 `json:"start_min"`
+		DurationMin float64 `json:"duration_min"`
+		AvgHR       float64 `json:"avg_hr"`
+	}
+	var segs []seg
+	if err := json.Unmarshal([]byte(jsonStr), &segs); err != nil || len(segs) == 0 {
+		return ""
+	}
+	var sb strings.Builder
+	for _, s := range segs {
+		startM := int(s.StartMin)
+		startS := int((s.StartMin - float64(startM)) * 60)
+		endMin := s.StartMin + s.DurationMin
+		endM := int(endMin)
+		endS := int((endMin - float64(endM)) * 60)
+		fmt.Fprintf(&sb, "%d:%02d–%d:%02d  Z%d  %.0f min  %.0fbpm avg\n",
+			startM, startS, endM, endS, s.Zone, s.DurationMin, s.AvgHR)
 	}
 	return sb.String()
 }

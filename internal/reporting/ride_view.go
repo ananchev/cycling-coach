@@ -15,8 +15,8 @@ func FormatWorkoutSummaryTable(w *storage.WorkoutWithMetrics) string {
 	}
 
 	var b strings.Builder
-	b.WriteString("Date       | Type            | Dur(min) | AvgP(W) | NP(W) | IF    | AvgHR | Drift% | TSS\n")
-	fmt.Fprintf(&b, "%-10s | %-15s | %8s | %7s | %5s | %5s | %5s | %6s | %3s",
+	b.WriteString("Date       | Type            | Dur(min) | AvgP(W) | NP(W) | IF    | AvgHR | AvgCad | Drift% | TSS\n")
+	fmt.Fprintf(&b, "%-10s | %-15s | %8s | %7s | %5s | %5s | %5s | %6s | %6s | %3s",
 		w.StartedAt.Format("2006-01-02"),
 		padOrDash(workoutTypeLabel(w.WorkoutType), 15),
 		fmtDurationMin(w.DurationSec),
@@ -24,6 +24,7 @@ func FormatWorkoutSummaryTable(w *storage.WorkoutWithMetrics) string {
 		fmtOptFloat(w.NormalizedPower, "%.0f"),
 		fmtOptFloat(w.IntensityFactor, "%.2f"),
 		fmtOptFloat(w.AvgHR, "%.0f"),
+		fmtOptFloat(w.AvgCadence, "%.0f"),
 		fmtOptFloat(w.HRDriftPct, "%.1f"),
 		fmtOptFloat(w.TSS, "%.0f"),
 	)
@@ -38,8 +39,10 @@ func FormatWorkoutZoneDetail(w *storage.WorkoutWithMetrics) string {
 	}
 
 	hasZones := w.PwrZ1Pct != nil
-	hasTimeline := w.ZoneTimeline != nil && *w.ZoneTimeline != ""
-	if !hasZones && !hasTimeline {
+	hasCadenceDist := w.CadLT70Pct != nil
+	hasPowerTimeline := w.ZoneTimeline != nil && *w.ZoneTimeline != ""
+	hasHRTimeline := w.HRZoneTimeline != nil && *w.HRZoneTimeline != ""
+	if !hasZones && !hasCadenceDist && !hasPowerTimeline && !hasHRTimeline {
 		return ""
 	}
 
@@ -54,13 +57,24 @@ func FormatWorkoutZoneDetail(w *storage.WorkoutWithMetrics) string {
 				derefFloat(w.HRZ1Pct), derefFloat(w.HRZ2Pct), derefFloat(w.HRZ3Pct), derefFloat(w.HRZ4Pct), derefFloat(w.HRZ5Pct))
 		}
 	}
+	if hasCadenceDist {
+		fmt.Fprintf(&b, "Cadence:     <70=%.0f%% 70-85=%.0f%% 85-100=%.0f%% 100+=%.0f%%\n",
+			derefFloat(w.CadLT70Pct), derefFloat(w.Cad70To85Pct), derefFloat(w.Cad85To100Pct), derefFloat(w.CadGE100Pct))
+	}
 
-	if hasTimeline {
+	if hasPowerTimeline {
 		if hasZones {
 			b.WriteString("\n")
 		}
 		b.WriteString("Power zone timeline:\n")
 		b.WriteString(formatZoneTimeline(*w.ZoneTimeline))
+	}
+	if hasHRTimeline {
+		if hasZones || hasPowerTimeline {
+			b.WriteString("\n")
+		}
+		b.WriteString("HR zone timeline:\n")
+		b.WriteString(formatHRZoneTimeline(*w.HRZoneTimeline))
 	}
 
 	return strings.TrimSpace(b.String())

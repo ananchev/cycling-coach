@@ -186,7 +186,7 @@ Current user-facing wording intentionally uses `Training Report`, `Training Plan
 Separate from report rendering, the admin UI also exposes modal-only workout views built from [`internal/reporting/ride_view.go`](/Users/ananchev/Development/cycling-coach/internal/reporting/ride_view.go):
 
 - a fixed-width summary row preview
-- a per-ride zone-detail preview
+- a per-ride zone-detail preview including power zones, HR zones, cadence distribution, power timeline, and HR timeline
 
 These are admin display helpers only; they do not change the Claude prompt formatting in `internal/reporting/assembler.go`.
 
@@ -201,6 +201,10 @@ These are admin display helpers only; they do not change the Claude prompt forma
 - a placeholder manual workout may appear for a day with no recorded workout; if a real workout arrives later for that day, the placeholder is reconciled away and its notes are moved
 - the Reports & Plans table combines both artifact types, orders them in natural workflow order, and exposes saved system/user prompts through icons
 - the Progress page exposes KPI snapshots, selected-vs-prior comparison, and a single saved AI interpretation with saved prompts
+- the Claude per-ride workout detail currently includes:
+  - average cadence in the summary row
+  - cadence distribution bands `<70`, `70-85`, `85-100`, `100+`
+  - both power and HR zone timelines when the processed FIT data supports them
 
 ## Conventions
 
