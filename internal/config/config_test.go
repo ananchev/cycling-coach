@@ -29,6 +29,7 @@ func TestLoad(t *testing.T) {
 				"FIT_FILES_PATH":       "/tmp/fit/",
 				"ATHLETE_PROFILE_PATH": "/tmp/profile.md",
 				"WAHOO_CLIENT_ID":      "wid",
+				"WYZE_SIDECAR_URL":     "http://wyze-sidecar:8090",
 				"ANTHROPIC_API_KEY":    "sk-test",
 				"TELEGRAM_CHAT_ID":     "12345",
 			},
@@ -38,6 +39,7 @@ func TestLoad(t *testing.T) {
 				FITFilesPath:       "/tmp/fit/",
 				AthleteProfilePath: "/tmp/profile.md",
 				WahooClientID:      "wid",
+				WyzeSidecarURL:     "http://wyze-sidecar:8090",
 				AnthropicAPIKey:    "sk-test",
 				TelegramChatID:     "12345",
 			},
@@ -70,6 +72,9 @@ func TestLoad(t *testing.T) {
 			if cfg.WahooClientID != tc.want.WahooClientID {
 				t.Errorf("WahooClientID = %q, want %q", cfg.WahooClientID, tc.want.WahooClientID)
 			}
+			if cfg.WyzeSidecarURL != tc.want.WyzeSidecarURL {
+				t.Errorf("WyzeSidecarURL = %q, want %q", cfg.WyzeSidecarURL, tc.want.WyzeSidecarURL)
+			}
 			if cfg.AnthropicAPIKey != tc.want.AnthropicAPIKey {
 				t.Errorf("AnthropicAPIKey = %q, want %q", cfg.AnthropicAPIKey, tc.want.AnthropicAPIKey)
 			}
@@ -85,9 +90,11 @@ func TestLoad(t *testing.T) {
 func setEnv(env map[string]string) func() {
 	keys := []string{
 		"WAHOO_CLIENT_ID", "WAHOO_CLIENT_SECRET", "WAHOO_REDIRECT_URI", "WAHOO_WEBHOOK_SECRET",
+		"WYZE_SIDECAR_URL",
 		"TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID",
 		"ANTHROPIC_API_KEY",
 		"SERVER_ADDR", "BASE_URL", "DATABASE_PATH", "FIT_FILES_PATH", "ATHLETE_PROFILE_PATH",
+		"CRON_SYNC", "CRON_FIT_PROCESSING", "CRON_WEEKLY_REPORT", "CRON_WYZE_SCALE_SYNC",
 	}
 
 	saved := make(map[string]string, len(keys))

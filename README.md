@@ -1,6 +1,6 @@
 # cycling-coach
 
-Personal cycling training assistant. It ingests workouts from Wahoo, stores subjective notes from Telegram and the admin UI, computes ride metrics from FIT files, generates report/plan periods with Claude, and can deliver summaries through Telegram.
+Personal cycling training assistant. It ingests workouts from Wahoo, stores subjective notes from Telegram and the admin UI, computes ride metrics from FIT files, imports body metrics from Wyze scale data through a Python sidecar, generates report/plan periods with Claude, and can deliver summaries through Telegram.
 
 This is my first vibe-coded app. The implementation was still reviewed carefully for architecture decisions, code patterns, and runtime behavior, but the project started from that workflow and keeps that spirit.
 
@@ -69,7 +69,7 @@ flowchart LR
 2. Workouts arrive through the Wahoo webhook and optional manual/scheduled sync.
 3. Workout rows are stored in SQLite and FIT files are downloaded to disk when available.
 4. FIT processing computes per-ride metrics such as NP, IF, TSS, TRIMP, HR drift, decoupling, power/HR zone distribution, cadence distribution, and power/HR zone timelines.
-5. Training reports and plans are assembled from workouts, computed metrics, notes, and the athlete profile markdown.
+5. Training reports and plans are assembled from workouts, computed metrics, notes, body metrics, and the athlete profile markdown.
 6. Claude returns structured JSON with a Telegram-sized summary plus a full narrative.
 7. The app renders HTML, stores it in the database, serves it at `/reports/{id}` or `/plans/{id}`, and can send the summary + link to Telegram.
 
@@ -132,14 +132,29 @@ flowchart LR
 - Outbound report delivery through the Bot API
 - Linking ride/note entries to the most recent workout within the last 12 hours
 
+### Wyze
+
+- Python sidecar integration for Wyze scale records
+- Manual or scheduled historical sync into `athlete_notes`
+- Idempotent import tracking through `wyze_scale_imports`
+- Additional imported body metrics:
+  - hydration / body water
+  - BMR
+- Structured body-metric block included in the Claude report/plan prompt
+- Admin `Wyze Sync` tab with:
+  - manual sync form
+  - mixed manual + Wyze body-metric table
+  - duplicate-aware delete actions
+
 ### Admin / HTTP
 
 - Admin UI at `/admin`
 - Health endpoint at `/health`
-- APIs for sync, processing, close-block generation, report generation, report sending, report deletion, note management, progress, body metrics, log streaming, and profile evolution
+- APIs for sync, processing, close-block generation, report generation, report sending, report deletion, note management, progress, body metrics, Wyze sync/records/conflicts, log streaming, and profile evolution
 - SSE log stream at `/api/logs/stream`
 - Workout admin actions for note state, summary-row preview, per-ride zone preview, and FIT time-series download
 - Body-metrics charts with date-range filtering
+- Body-metrics charts suppress manual rows that duplicate same-day Wyze records
 - Reports & Plans table ordered in the natural workflow sequence: closed report first, then the following plan
 
 ## Current Routes
@@ -160,6 +175,7 @@ flowchart LR
 
 - `GET /admin`
 - `POST /api/sync`
+- `POST /api/wyze/sync`
 - `POST /api/process`
 - `POST /api/workout/reset-fit`
 - `POST /api/workout/ignore`
@@ -172,6 +188,10 @@ flowchart LR
 - `GET /api/progress`
 - `POST /api/progress/interpret`
 - `GET /api/body-metrics`
+- `GET /api/wyze/conflicts`
+- `GET /api/wyze/records`
+- `DELETE /api/wyze/conflicts/{id}`
+- `DELETE /api/wyze/records/{id}`
 - `POST /api/notes`
 - `GET /api/notes`
 - `PUT /api/notes/{id}`
@@ -218,6 +238,17 @@ Telegram is optional. If `TELEGRAM_BOT_TOKEN` or `TELEGRAM_CHAT_ID` is missing, 
 
 Claude-backed report generation requires `ANTHROPIC_API_KEY`.
 
+Wyze is optional. To enable it, configure the Go app to talk to the sidecar and configure the Python sidecar with Wyze credentials:
+
+```env
+WYZE_SIDECAR_URL=http://localhost:8090
+WYZE_EMAIL=
+WYZE_PASSWORD=
+WYZE_KEY_ID=
+WYZE_API_KEY=
+WYZE_TOTP_KEY=
+```
+
 ### Scheduler
 
 The scheduler exists in code, but jobs are registered only when cron environment variables are set:
@@ -226,6 +257,7 @@ The scheduler exists in code, but jobs are registered only when cron environment
 CRON_SYNC=
 CRON_FIT_PROCESSING=
 CRON_WEEKLY_REPORT=
+CRON_WYZE_SCALE_SYNC=
 ```
 
 If all three are empty, the scheduler starts with no active jobs.
@@ -249,6 +281,7 @@ http://localhost:8080/admin
 From there you can:
 
 - review workouts and their processing state
+- trigger Wyze body-metric sync
 - open ride notes and general notes
 - inspect the summary row sent to Claude
 - inspect the per-ride zone detail sent to Claude
@@ -258,6 +291,7 @@ From there you can:
 - send reports through Telegram
 - inspect logs live through SSE-backed log streaming
 - review body metrics with date filtering
+- review mixed manual + Wyze body-metric rows and delete duplicate records from the Wyze tab
 - review progress KPIs and save an AI-generated trend interpretation
 - review and evolve the athlete profile
 
@@ -301,8 +335,14 @@ Then:
 
 ### Body Metrics
 
-- Review weight, body fat, and muscle mass over time
+- Review weight, body fat, muscle mass, hydration, and BMR over time
 - Filter charts by `From` / `To` date range
+
+### Wyze Sync
+
+- Sync body metrics from Wyze for a chosen period
+- Review the mixed manual + Wyze body-metric table
+- Delete duplicate manual or Wyze rows directly from the UI when they are flagged as duplicates
 
 ### Reports and Plans
 
@@ -396,6 +436,45 @@ curl -X POST http://localhost:8080/api/notes \
 
 ```bash
 curl "http://localhost:8080/api/body-metrics?from=2026-03-01&to=2026-03-31"
+```
+
+### Sync Wyze body metrics
+
+```bash
+curl -X POST http://localhost:8080/api/wyze/sync \
+  -H 'Content-Type: application/json' \
+  -d '{"from":"2026-04-01","to":"2026-04-09"}'
+```
+
+### List Wyze tab records
+
+```bash
+curl "http://localhost:8080/api/wyze/records?from=2026-04-01&to=2026-04-09"
+```
+
+### List explicit Wyze conflicts
+
+```bash
+curl http://localhost:8080/api/wyze/conflicts
+```
+
+### Delete a duplicate manual row from the Wyze table
+
+```bash
+curl -X DELETE "http://localhost:8080/api/wyze/records/14?source=manual"
+```
+
+### Delete a duplicate Wyze row from the Wyze table
+
+```bash
+curl -X DELETE "http://localhost:8080/api/wyze/records/18?source=wyze"
+```
+
+### Delete the manual or Wyze side of an explicit tracked conflict
+
+```bash
+curl -X DELETE "http://localhost:8080/api/wyze/conflicts/1?side=manual"
+curl -X DELETE "http://localhost:8080/api/wyze/conflicts/1?side=wyze"
 ```
 
 ### Download workout FIT time-series data

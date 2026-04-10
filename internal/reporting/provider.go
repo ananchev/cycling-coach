@@ -62,6 +62,8 @@ type NoteSummary struct {
 	WeightKG     *float64
 	BodyFatPct   *float64
 	MuscleMassKG *float64
+	BodyWaterPct *float64
+	BMRKcal      *float64
 	Text         *string
 }
 

@@ -21,6 +21,7 @@ import (
 	"cycling-coach/internal/telegram"
 	"cycling-coach/internal/wahoo"
 	"cycling-coach/internal/web"
+	wyzepkg "cycling-coach/internal/wyze"
 )
 
 func main() {
@@ -64,6 +65,15 @@ func main() {
 
 	processor := analysis.NewProcessor(db.DB(), cfg.FITFilesPath)
 
+	var wyzeImporter *wyzepkg.Importer
+	if cfg.WyzeSidecarURL != "" {
+		wyzeClient := wyzepkg.NewClient(cfg.WyzeSidecarURL)
+		wyzeImporter = wyzepkg.NewImporter(db.DB(), wyzeClient)
+		slog.Info("wyze: sidecar importer enabled", "url", cfg.WyzeSidecarURL)
+	} else {
+		slog.Info("wyze: disabled (WYZE_SIDECAR_URL not set)")
+	}
+
 	claudeProvider := reporting.NewClaudeProvider(cfg.AnthropicAPIKey, cfg.AnthropicModel)
 	orch := reporting.NewOrchestrator(db.DB(), cfg.AthleteProfilePath, claudeProvider)
 
@@ -94,7 +104,7 @@ func main() {
 		slog.Info("telegram: disabled (TELEGRAM_BOT_TOKEN or TELEGRAM_CHAT_ID not set)")
 	}
 
-	sched, err := scheduler.NewScheduler(cfg, syncer, processor, orch, deliverySvc)
+	sched, err := scheduler.NewScheduler(cfg, syncer, processor, orch, deliverySvc, wyzeImporter)
 	if err != nil {
 		slog.Error("scheduler.New", "err", err)
 		os.Exit(1)
@@ -109,7 +119,7 @@ func main() {
 		go tgBot.Run(botCtx)
 	}
 
-	router := web.NewRouter(cfg, db.DB(), authHandler, syncer, webhookHandler, orch, deliverySvc, processor, logBroadcaster)
+	router := web.NewRouter(cfg, db.DB(), authHandler, syncer, webhookHandler, orch, deliverySvc, processor, wyzeImporter, logBroadcaster)
 
 	srv := &http.Server{Addr: cfg.ServerAddr, Handler: router}
 

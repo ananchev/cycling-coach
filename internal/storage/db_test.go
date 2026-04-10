@@ -19,6 +19,8 @@ func TestOpen_InMemory(t *testing.T) {
 		"workouts",
 		"ride_metrics",
 		"athlete_notes",
+		"wyze_scale_imports",
+		"wyze_scale_conflicts",
 		"athlete_config",
 		"reports",
 	}

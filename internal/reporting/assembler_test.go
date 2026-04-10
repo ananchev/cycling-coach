@@ -215,3 +215,43 @@ func TestBuildPrompt_ReportExtendedBeyondPlannedWeek(t *testing.T) {
 		t.Errorf("prompt should mention extended execution window; got:\n%s", prompt)
 	}
 }
+
+func TestBuildPrompt_IncludesStructuredBodyMetricsBlock(t *testing.T) {
+	weekStart := time.Date(2026, 4, 7, 0, 0, 0, 0, time.UTC)
+	weight := 77.4
+	bodyFat := 18.2
+	muscle := 36.8
+	water := 55.1
+	bmr := 1684.0
+	input := &reporting.ReportInput{
+		Type:      storage.ReportTypeWeeklyReport,
+		WeekStart: weekStart,
+		WeekEnd:   weekStart.Add(7 * 24 * time.Hour),
+		Notes: []reporting.NoteSummary{
+			{
+				Timestamp:    weekStart.Add(7*time.Hour + 14*time.Minute),
+				Type:         storage.NoteTypeWeight,
+				WeightKG:     &weight,
+				BodyFatPct:   &bodyFat,
+				MuscleMassKG: &muscle,
+				BodyWaterPct: &water,
+				BMRKcal:      &bmr,
+			},
+		},
+	}
+
+	prompt := reporting.BuildPrompt(input)
+
+	for _, want := range []string{
+		"## Body metrics",
+		"weight=77.4kg",
+		"bf=18.2%",
+		"muscle=36.8kg",
+		"water=55.1%",
+		"bmr=1684kcal",
+	} {
+		if !strings.Contains(prompt, want) {
+			t.Errorf("prompt missing %q", want)
+		}
+	}
+}

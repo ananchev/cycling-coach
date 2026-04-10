@@ -6,9 +6,9 @@ server
 # Environment
 .env
 
-# Data (persisted in Docker volume, not in repo)
+# Data
 data/
-*.db
+*.db*
 
 # IDE
 .vscode/
@@ -22,3 +22,6 @@ Thumbs.db
 # Go
 vendor/
 .gocache/
+
+# Python
+__pycache__/

@@ -12,7 +12,12 @@ import (
 	"cycling-coach/internal/reporting"
 	"cycling-coach/internal/storage"
 	"cycling-coach/internal/wahoo"
+	wyzepkg "cycling-coach/internal/wyze"
 )
+
+type wyzeImporter interface {
+	Import(ctx context.Context, from, to time.Time) (*wyzepkg.ImportResult, error)
+}
 
 // Scheduler runs periodic background jobs: Wahoo sync, FIT processing, report generation, and Telegram delivery.
 // All jobs log via slog. A failure in one job does not affect others.
@@ -23,12 +28,13 @@ type Scheduler struct {
 	processor *analysis.Processor
 	orch      *reporting.Orchestrator
 	delivery  *reporting.DeliveryService // nil when Telegram is not configured
+	wyze      wyzeImporter
 }
 
 // NewScheduler creates a Scheduler. delivery may be nil when Telegram is disabled.
 // All timed jobs run in the Europe/Amsterdam timezone as specified in ARCHITECTURE.md.
 // Only jobs with a non-empty cron expression in cfg are registered.
-func NewScheduler(cfg *config.Config, syncer *wahoo.Syncer, processor *analysis.Processor, orch *reporting.Orchestrator, delivery *reporting.DeliveryService) (*Scheduler, error) {
+func NewScheduler(cfg *config.Config, syncer *wahoo.Syncer, processor *analysis.Processor, orch *reporting.Orchestrator, delivery *reporting.DeliveryService, wyze wyzeImporter) (*Scheduler, error) {
 	loc, err := time.LoadLocation("Europe/Amsterdam")
 	if err != nil {
 		return nil, err
@@ -40,6 +46,7 @@ func NewScheduler(cfg *config.Config, syncer *wahoo.Syncer, processor *analysis.
 		processor: processor,
 		orch:      orch,
 		delivery:  delivery,
+		wyze:      wyze,
 	}
 
 	var registered []string
@@ -61,6 +68,13 @@ func NewScheduler(cfg *config.Config, syncer *wahoo.Syncer, processor *analysis.
 			return nil, err
 		}
 		registered = append(registered, "fit-processing="+cfg.CronFITProcessing)
+	}
+
+	if cfg.CronWyzeScaleSync != "" && s.wyze != nil {
+		if _, err := c.AddFunc(cfg.CronWyzeScaleSync, s.runWyzeScaleSync); err != nil {
+			return nil, err
+		}
+		registered = append(registered, "wyze-scale-sync="+cfg.CronWyzeScaleSync)
 	}
 
 	if cfg.CronWeeklyReport != "" {
@@ -125,6 +139,30 @@ func (s *Scheduler) runFITProcessing() {
 			"skipped_no_fit", r.SkippedNoFIT,
 		)
 	}
+}
+
+func (s *Scheduler) runWyzeScaleSync() {
+	if s.wyze == nil {
+		return
+	}
+	from := time.Now().AddDate(0, 0, -7)
+	to := time.Now()
+	slog.Info("scheduler: wyze scale sync starting",
+		"from", from.Format("2006-01-02"),
+		"to", to.Format("2006-01-02"),
+	)
+	result, err := s.wyze.Import(context.Background(), from, to)
+	if err != nil {
+		slog.Error("scheduler: wyze scale sync failed", "err", err)
+		return
+	}
+	slog.Info("scheduler: wyze scale sync complete",
+		"inserted", result.Inserted,
+		"updated", result.Updated,
+		"skipped", result.Skipped,
+		"conflict_with_manual", result.ConflictWithManual,
+		"errors", len(result.Errors),
+	)
 }
 
 func (s *Scheduler) runWeeklyReport() {

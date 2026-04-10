@@ -10,5 +10,13 @@ services:
     env_file:
       - .env
 
+  wyze-sidecar:
+    build:
+      context: ./wyze_sidecar
+    container_name: wyze-sidecar
+    restart: unless-stopped
+    env_file:
+      - .env
+
 volumes:
   coach-data:

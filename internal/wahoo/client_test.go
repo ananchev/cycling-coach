@@ -3,14 +3,13 @@ package wahoo
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
-	"net/http/httptest"
 	"os"
+	"strings"
 	"testing"
 	"time"
 )
-
-
 
 // mockWorkoutResponse builds a WorkoutListResponse JSON body for the given page.
 func mockWorkoutResponse(t *testing.T, workouts []APIWorkout, total int) []byte {
@@ -71,17 +70,22 @@ func TestClient_ListWorkouts_ParsesResponse(t *testing.T) {
 	workouts := twoAPIWorkouts()
 	body := mockWorkoutResponse(t, workouts, 2)
 
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	httpClient := &http.Client{Transport: wahooRoundTripFunc(func(r *http.Request) (*http.Response, error) {
 		if r.URL.Path != "/v1/workouts" {
-			http.NotFound(w, r)
-			return
+			return &http.Response{
+				StatusCode: http.StatusNotFound,
+				Header:     make(http.Header),
+				Body:       io.NopCloser(strings.NewReader("not found")),
+			}, nil
 		}
-		w.Header().Set("Content-Type", "application/json")
-		w.Write(body) //nolint:errcheck
-	}))
-	defer server.Close()
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     make(http.Header),
+			Body:       io.NopCloser(strings.NewReader(string(body))),
+		}, nil
+	})}
 
-	client := newClientForTest(server.Client(), server.URL)
+	client := newClientForTest(httpClient, "https://example.test")
 	resp, err := client.ListWorkouts(context.Background(), 1, 30, time.Time{}, time.Time{})
 	if err != nil {
 		t.Fatalf("ListWorkouts: %v", err)
@@ -107,12 +111,15 @@ func TestClient_ListWorkouts_ParsesResponse(t *testing.T) {
 }
 
 func TestClient_ListWorkouts_NonOKStatus(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		http.Error(w, "unauthorized", http.StatusUnauthorized)
-	}))
-	defer server.Close()
+	httpClient := &http.Client{Transport: wahooRoundTripFunc(func(r *http.Request) (*http.Response, error) {
+		return &http.Response{
+			StatusCode: http.StatusUnauthorized,
+			Header:     make(http.Header),
+			Body:       io.NopCloser(strings.NewReader("unauthorized\n")),
+		}, nil
+	})}
 
-	client := newClientForTest(server.Client(), server.URL)
+	client := newClientForTest(httpClient, "https://example.test")
 	_, err := client.ListWorkouts(context.Background(), 1, 30, time.Time{}, time.Time{})
 	if err == nil {
 		t.Fatal("expected error for non-OK status")
@@ -122,17 +129,21 @@ func TestClient_ListWorkouts_NonOKStatus(t *testing.T) {
 func TestClient_ListWorkouts_BearerTokenPassedThrough(t *testing.T) {
 	var receivedAuth string
 
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	baseTransport := wahooRoundTripFunc(func(r *http.Request) (*http.Response, error) {
 		receivedAuth = r.Header.Get("Authorization")
-		json.NewEncoder(w).Encode(WorkoutListResponse{}) //nolint:errcheck
-	}))
-	defer server.Close()
+		body, _ := json.Marshal(WorkoutListResponse{})
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     make(http.Header),
+			Body:       io.NopCloser(strings.NewReader(string(body))),
+		}, nil
+	})
 
 	// Build a client that injects a Bearer token via a custom RoundTripper.
-	transport := &bearerTransport{token: "test-access-token", base: server.Client().Transport}
+	transport := &bearerTransport{token: "test-access-token", base: baseTransport}
 	authClient := &http.Client{Transport: transport}
 
-	client := newClientForTest(authClient, server.URL)
+	client := newClientForTest(authClient, "https://example.test")
 	client.ListWorkouts(context.Background(), 1, 30, time.Time{}, time.Time{}) //nolint:errcheck
 
 	if receivedAuth != "Bearer test-access-token" {
@@ -143,15 +154,20 @@ func TestClient_ListWorkouts_BearerTokenPassedThrough(t *testing.T) {
 func TestClient_DownloadFIT(t *testing.T) {
 	fitContent := []byte("FIT_FILE_BINARY_DATA")
 
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Write(fitContent) //nolint:errcheck
-	}))
-	defer server.Close()
-
 	destPath := t.TempDir() + "/test.fit"
-	client := newClientForTest(server.Client(), server.URL)
+	origDefaultClient := http.DefaultClient
+	http.DefaultClient = &http.Client{Transport: wahooRoundTripFunc(func(r *http.Request) (*http.Response, error) {
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     make(http.Header),
+			Body:       io.NopCloser(strings.NewReader(string(fitContent))),
+		}, nil
+	})}
+	defer func() { http.DefaultClient = origDefaultClient }()
 
-	if err := client.DownloadFIT(context.Background(), server.URL+"/fit/1234.fit", destPath); err != nil {
+	client := newClientForTest(&http.Client{}, "https://example.test")
+
+	if err := client.DownloadFIT(context.Background(), "https://example.test/fit/1234.fit", destPath); err != nil {
 		t.Fatalf("DownloadFIT: %v", err)
 	}
 
@@ -174,4 +190,10 @@ func (t *bearerTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	r2 := req.Clone(req.Context())
 	r2.Header.Set("Authorization", "Bearer "+t.token)
 	return t.base.RoundTrip(r2)
+}
+
+type wahooRoundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f wahooRoundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {
+	return f(req)
 }

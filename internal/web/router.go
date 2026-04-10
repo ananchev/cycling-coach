@@ -10,10 +10,11 @@ import (
 	"cycling-coach/internal/config"
 	"cycling-coach/internal/reporting"
 	"cycling-coach/internal/wahoo"
+	wyzepkg "cycling-coach/internal/wyze"
 )
 
 // NewRouter constructs the HTTP router with all middleware and routes wired.
-func NewRouter(cfg *config.Config, db *sql.DB, auth *wahoo.AuthHandler, syncer *wahoo.Syncer, webhookHandler *wahoo.WebhookHandler, orch *reporting.Orchestrator, delivery *reporting.DeliveryService, proc *analysis.Processor, logs *LogBroadcaster) http.Handler {
+func NewRouter(cfg *config.Config, db *sql.DB, auth *wahoo.AuthHandler, syncer *wahoo.Syncer, webhookHandler *wahoo.WebhookHandler, orch *reporting.Orchestrator, delivery *reporting.DeliveryService, proc *analysis.Processor, wyzeImporter *wyzepkg.Importer, logs *LogBroadcaster) http.Handler {
 	r := chi.NewRouter()
 
 	r.Use(recoveryMiddleware)
@@ -35,6 +36,7 @@ func NewRouter(cfg *config.Config, db *sql.DB, auth *wahoo.AuthHandler, syncer *
 
 	// Admin endpoints — protected by Cloudflare Access in production.
 	r.Post("/api/sync", syncHandler(syncer))
+	r.Post("/api/wyze/sync", wyzeSyncHandler(wyzeImporter))
 	r.Post("/api/process", processHandler(proc))
 	r.Post("/api/workout/reset-fit", resetFITHandler(proc))
 	r.Post("/api/workout/ignore", ignoreFITHandler(db))
@@ -51,6 +53,10 @@ func NewRouter(cfg *config.Config, db *sql.DB, auth *wahoo.AuthHandler, syncer *
 
 	// Body metrics & note management.
 	r.Get("/api/body-metrics", bodyMetricsHandler(db))
+	r.Get("/api/wyze/conflicts", listWyzeConflictsHandler(db))
+	r.Get("/api/wyze/records", listWyzeRecordsHandler(db))
+	r.Delete("/api/wyze/records/{id}", deleteWyzeRecordHandler(db))
+	r.Delete("/api/wyze/conflicts/{id}", deleteWyzeConflictEntryHandler(db))
 	r.Post("/api/notes", createNoteHandler(db))
 	r.Get("/api/notes", listNotesHandler(db))
 	r.Put("/api/notes/{id}", updateNoteHandler(db))

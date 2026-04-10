@@ -3,8 +3,8 @@ package reporting_test
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
-	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
@@ -19,7 +19,7 @@ func TestClaudeProvider_Generate_Success(t *testing.T) {
 			{"type": "text", "text": `{"summary":"Good week.","narrative":"# Narrative\n\nDetails."}`},
 		},
 	}
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	client := &http.Client{Transport: reportingRoundTripFunc(func(r *http.Request) (*http.Response, error) {
 		if r.Method != http.MethodPost {
 			t.Errorf("expected POST, got %s", r.Method)
 		}
@@ -33,12 +33,15 @@ func TestClaudeProvider_Generate_Success(t *testing.T) {
 			t.Errorf("missing anthropic-version header")
 		}
 
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(respPayload) //nolint:errcheck
-	}))
-	defer srv.Close()
+		body, _ := json.Marshal(respPayload)
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     make(http.Header),
+			Body:       io.NopCloser(strings.NewReader(string(body))),
+		}, nil
+	})}
 
-	p := reporting.NewClaudeProviderForTest("test-key", srv.URL, srv.Client())
+	p := reporting.NewClaudeProviderForTest("test-key", "https://example.test", client)
 
 	weekStart := time.Date(2026, 3, 9, 0, 0, 0, 0, time.UTC)
 	input := &reporting.ReportInput{
@@ -63,7 +66,7 @@ func TestClaudeProvider_Generate_Success(t *testing.T) {
 func TestClaudeProvider_Generate_RequestBody(t *testing.T) {
 	var gotBody map[string]any
 
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	client := &http.Client{Transport: reportingRoundTripFunc(func(r *http.Request) (*http.Response, error) {
 		if err := json.NewDecoder(r.Body).Decode(&gotBody); err != nil {
 			t.Errorf("decode body: %v", err)
 		}
@@ -72,12 +75,15 @@ func TestClaudeProvider_Generate_RequestBody(t *testing.T) {
 				{"type": "text", "text": `{"summary":"s","narrative":"n"}`},
 			},
 		}
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(respPayload) //nolint:errcheck
-	}))
-	defer srv.Close()
+		body, _ := json.Marshal(respPayload)
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     make(http.Header),
+			Body:       io.NopCloser(strings.NewReader(string(body))),
+		}, nil
+	})}
 
-	p := reporting.NewClaudeProviderForTest("test-key", srv.URL, srv.Client())
+	p := reporting.NewClaudeProviderForTest("test-key", "https://example.test", client)
 
 	weekStart := time.Date(2026, 3, 9, 0, 0, 0, 0, time.UTC)
 	input := &reporting.ReportInput{
@@ -104,12 +110,15 @@ func TestClaudeProvider_Generate_RequestBody(t *testing.T) {
 }
 
 func TestClaudeProvider_Generate_APIError(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		http.Error(w, "rate limited", http.StatusTooManyRequests)
-	}))
-	defer srv.Close()
+	client := &http.Client{Transport: reportingRoundTripFunc(func(r *http.Request) (*http.Response, error) {
+		return &http.Response{
+			StatusCode: http.StatusTooManyRequests,
+			Header:     make(http.Header),
+			Body:       io.NopCloser(strings.NewReader("rate limited\n")),
+		}, nil
+	})}
 
-	p := reporting.NewClaudeProviderForTest("test-key", srv.URL, srv.Client())
+	p := reporting.NewClaudeProviderForTest("test-key", "https://example.test", client)
 
 	weekStart := time.Date(2026, 3, 9, 0, 0, 0, 0, time.UTC)
 	input := &reporting.ReportInput{
@@ -130,18 +139,21 @@ func TestClaudeProvider_Generate_APIError(t *testing.T) {
 func TestClaudeProvider_Generate_CodeFenceStripped(t *testing.T) {
 	fencedJSON := "```json\n{\"summary\":\"Fence summary.\",\"narrative\":\"Fence narrative.\"}\n```"
 
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	client := &http.Client{Transport: reportingRoundTripFunc(func(r *http.Request) (*http.Response, error) {
 		respPayload := map[string]any{
 			"content": []map[string]any{
 				{"type": "text", "text": fencedJSON},
 			},
 		}
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(respPayload) //nolint:errcheck
-	}))
-	defer srv.Close()
+		body, _ := json.Marshal(respPayload)
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     make(http.Header),
+			Body:       io.NopCloser(strings.NewReader(string(body))),
+		}, nil
+	})}
 
-	p := reporting.NewClaudeProviderForTest("test-key", srv.URL, srv.Client())
+	p := reporting.NewClaudeProviderForTest("test-key", "https://example.test", client)
 
 	weekStart := time.Date(2026, 3, 9, 0, 0, 0, 0, time.UTC)
 	input := &reporting.ReportInput{
@@ -157,4 +169,10 @@ func TestClaudeProvider_Generate_CodeFenceStripped(t *testing.T) {
 	if out.Summary != "Fence summary." {
 		t.Errorf("unexpected summary: %q", out.Summary)
 	}
+}
+
+type reportingRoundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f reportingRoundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) {
+	return f(r)
 }

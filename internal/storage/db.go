@@ -200,6 +200,27 @@ var migrations = []string{
 		created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 	)`,
 
+	`CREATE TABLE IF NOT EXISTS wyze_scale_imports (
+		id              INTEGER PRIMARY KEY AUTOINCREMENT,
+		wyze_record_id  TEXT NOT NULL UNIQUE,
+		athlete_note_id INTEGER NOT NULL REFERENCES athlete_notes(id),
+		measured_at     DATETIME NOT NULL,
+		payload_hash    TEXT NOT NULL,
+		raw_payload_json TEXT,
+		created_at      DATETIME DEFAULT CURRENT_TIMESTAMP,
+		updated_at      DATETIME DEFAULT CURRENT_TIMESTAMP,
+		last_seen_at    DATETIME DEFAULT CURRENT_TIMESTAMP
+	)`,
+
+	`CREATE TABLE IF NOT EXISTS wyze_scale_conflicts (
+		id              INTEGER PRIMARY KEY AUTOINCREMENT,
+		wyze_record_id  TEXT NOT NULL UNIQUE,
+		manual_note_id  INTEGER NOT NULL REFERENCES athlete_notes(id),
+		wyze_note_id    INTEGER NOT NULL REFERENCES athlete_notes(id),
+		conflict_type   TEXT NOT NULL DEFAULT 'conflict_with_manual',
+		created_at      DATETIME DEFAULT CURRENT_TIMESTAMP
+	)`,
+
 	`CREATE TABLE IF NOT EXISTS athlete_config (
 		key        TEXT PRIMARY KEY,
 		value      TEXT NOT NULL,
@@ -235,6 +256,9 @@ var migrations = []string{
 	`CREATE INDEX IF NOT EXISTS idx_workouts_processed  ON workouts(processed)`,
 	`CREATE INDEX IF NOT EXISTS idx_notes_timestamp     ON athlete_notes(timestamp)`,
 	`CREATE INDEX IF NOT EXISTS idx_notes_workout_id    ON athlete_notes(workout_id)`,
+	`CREATE INDEX IF NOT EXISTS idx_wyze_imports_measured_at ON wyze_scale_imports(measured_at)`,
+	`CREATE INDEX IF NOT EXISTS idx_wyze_conflicts_manual_note_id ON wyze_scale_conflicts(manual_note_id)`,
+	`CREATE INDEX IF NOT EXISTS idx_wyze_conflicts_wyze_note_id ON wyze_scale_conflicts(wyze_note_id)`,
 	`CREATE INDEX IF NOT EXISTS idx_reports_week_start  ON reports(week_start)`,
 	`CREATE INDEX IF NOT EXISTS idx_progress_period_from ON progress_analyses(period_from)`,
 
@@ -295,4 +319,6 @@ var migrations = []string{
 	// Migration: add body composition columns to athlete_notes.
 	`ALTER TABLE athlete_notes ADD COLUMN body_fat_pct REAL`,
 	`ALTER TABLE athlete_notes ADD COLUMN muscle_mass_kg REAL`,
+	`ALTER TABLE athlete_notes ADD COLUMN body_water_pct REAL`,
+	`ALTER TABLE athlete_notes ADD COLUMN bmr_kcal REAL`,
 }

@@ -10,13 +10,16 @@ type Config struct {
 	WahooRedirectURI   string
 	WahooWebhookSecret string
 
+	// Wyze sidecar
+	WyzeSidecarURL string
+
 	// Telegram
 	TelegramBotToken string
 	TelegramChatID   string
 
 	// Anthropic
-	AnthropicAPIKey   string
-	AnthropicModel    string
+	AnthropicAPIKey string
+	AnthropicModel  string
 
 	// Server
 	ServerAddr         string
@@ -29,6 +32,7 @@ type Config struct {
 	CronSync          string // Wahoo sync, e.g. "0 */4 * * *"
 	CronFITProcessing string // FIT file processing, e.g. "*/15 * * * *"
 	CronWeeklyReport  string // Weekly report + plan + delivery, e.g. "0 20 * * 0"
+	CronWyzeScaleSync string // Wyze scale sync via sidecar
 }
 
 // Load reads configuration from environment variables, applying defaults where defined.
@@ -38,6 +42,7 @@ func Load() (*Config, error) {
 		WahooClientSecret:  os.Getenv("WAHOO_CLIENT_SECRET"),
 		WahooRedirectURI:   os.Getenv("WAHOO_REDIRECT_URI"),
 		WahooWebhookSecret: os.Getenv("WAHOO_WEBHOOK_SECRET"),
+		WyzeSidecarURL:     os.Getenv("WYZE_SIDECAR_URL"),
 
 		TelegramBotToken: os.Getenv("TELEGRAM_BOT_TOKEN"),
 		TelegramChatID:   os.Getenv("TELEGRAM_CHAT_ID"),
@@ -54,6 +59,7 @@ func Load() (*Config, error) {
 		CronSync:          os.Getenv("CRON_SYNC"),
 		CronFITProcessing: os.Getenv("CRON_FIT_PROCESSING"),
 		CronWeeklyReport:  os.Getenv("CRON_WEEKLY_REPORT"),
+		CronWyzeScaleSync: os.Getenv("CRON_WYZE_SCALE_SYNC"),
 	}, nil
 }
 

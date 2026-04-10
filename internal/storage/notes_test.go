@@ -30,15 +30,33 @@ func TestInsertNote_WeightNote(t *testing.T) {
 	db := openTestDB(t)
 
 	kg := 90.3
+	hydration := 54.2
+	bmr := 1684.0
 	n := &AthleteNote{
-		Timestamp: time.Date(2026, 3, 10, 8, 0, 0, 0, time.UTC),
-		Type:      NoteTypeWeight,
-		WeightKG:  &kg,
+		Timestamp:    time.Date(2026, 3, 10, 8, 0, 0, 0, time.UTC),
+		Type:         NoteTypeWeight,
+		WeightKG:     &kg,
+		BodyWaterPct: &hydration,
+		BMRKcal:      &bmr,
 	}
 
 	_, err := InsertNote(db, n)
 	if err != nil {
 		t.Fatalf("InsertNote weight: %v", err)
+	}
+
+	got, err := ListBodyMetrics(db, time.Time{}, time.Time{}, 10)
+	if err != nil {
+		t.Fatalf("ListBodyMetrics: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("expected 1 body metric row, got %d", len(got))
+	}
+	if got[0].BodyWaterPct == nil || *got[0].BodyWaterPct != hydration {
+		t.Fatalf("BodyWaterPct = %v, want %.1f", got[0].BodyWaterPct, hydration)
+	}
+	if got[0].BMRKcal == nil || *got[0].BMRKcal != bmr {
+		t.Fatalf("BMRKcal = %v, want %.1f", got[0].BMRKcal, bmr)
 	}
 }
 
@@ -135,5 +153,103 @@ func TestListBodyMetrics_ByDateRange(t *testing.T) {
 	}
 	if got[0].WeightKG == nil || *got[0].WeightKG != 89.8 {
 		t.Fatalf("unexpected metric returned: %+v", got[0])
+	}
+}
+
+func TestListBodyMetrics_IncludesHydrationAndBMRRows(t *testing.T) {
+	db := openTestDB(t)
+
+	hydration := 55.6
+	bmr := 1701.0
+	if _, err := InsertNote(db, &AthleteNote{
+		Timestamp:    time.Date(2026, 3, 12, 8, 0, 0, 0, time.UTC),
+		Type:         NoteTypeWeight,
+		BodyWaterPct: &hydration,
+		BMRKcal:      &bmr,
+	}); err != nil {
+		t.Fatalf("InsertNote: %v", err)
+	}
+
+	got, err := ListBodyMetrics(
+		db,
+		time.Date(2026, 3, 12, 0, 0, 0, 0, time.UTC),
+		time.Date(2026, 3, 12, 23, 59, 59, 0, time.UTC),
+		10,
+	)
+	if err != nil {
+		t.Fatalf("ListBodyMetrics: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("expected 1 body metric row, got %d", len(got))
+	}
+	if got[0].BodyWaterPct == nil || *got[0].BodyWaterPct != hydration {
+		t.Fatalf("BodyWaterPct = %v, want %.1f", got[0].BodyWaterPct, hydration)
+	}
+	if got[0].BMRKcal == nil || *got[0].BMRKcal != bmr {
+		t.Fatalf("BMRKcal = %v, want %.1f", got[0].BMRKcal, bmr)
+	}
+}
+
+func TestListBodyMetrics_ExcludesManualRowsDuplicatedByWyzeSameDay(t *testing.T) {
+	db := openTestDB(t)
+
+	weight := 89.9
+	bodyFat := 24.8
+	muscle := 63.4
+	if _, err := InsertNote(db, &AthleteNote{
+		Timestamp: time.Date(2026, 4, 9, 7, 0, 0, 0, time.UTC),
+		Type:      NoteTypeWeight,
+		WeightKG:  &weight,
+	}); err != nil {
+		t.Fatalf("InsertNote(weight): %v", err)
+	}
+	if _, err := InsertNote(db, &AthleteNote{
+		Timestamp:  time.Date(2026, 4, 9, 7, 1, 0, 0, time.UTC),
+		Type:       NoteTypeWeight,
+		BodyFatPct: &bodyFat,
+	}); err != nil {
+		t.Fatalf("InsertNote(bodyfat): %v", err)
+	}
+	if _, err := InsertNote(db, &AthleteNote{
+		Timestamp:     time.Date(2026, 4, 9, 7, 2, 0, 0, time.UTC),
+		Type:          NoteTypeWeight,
+		MuscleMassKG:  &muscle,
+	}); err != nil {
+		t.Fatalf("InsertNote(muscle): %v", err)
+	}
+
+	wyzeID, err := InsertNote(db, &AthleteNote{
+		Timestamp:     time.Date(2026, 4, 9, 17, 59, 1, 0, time.UTC),
+		Type:          NoteTypeWeight,
+		WeightKG:      &weight,
+		BodyFatPct:    &bodyFat,
+		MuscleMassKG:  &muscle,
+	})
+	if err != nil {
+		t.Fatalf("InsertNote(wyze): %v", err)
+	}
+	if _, err := UpsertWyzeScaleImport(db, &WyzeScaleImport{
+		WyzeRecordID:  "wyze:scale_record:xyz",
+		AthleteNoteID: wyzeID,
+		MeasuredAt:    time.Date(2026, 4, 9, 17, 59, 1, 0, time.UTC),
+		PayloadHash:   "hash-x",
+	}); err != nil {
+		t.Fatalf("UpsertWyzeScaleImport: %v", err)
+	}
+
+	got, err := ListBodyMetrics(
+		db,
+		time.Date(2026, 4, 9, 0, 0, 0, 0, time.UTC),
+		time.Date(2026, 4, 9, 23, 59, 59, 0, time.UTC),
+		20,
+	)
+	if err != nil {
+		t.Fatalf("ListBodyMetrics: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("expected only 1 wyze chart row after dedupe, got %d", len(got))
+	}
+	if got[0].ID != wyzeID {
+		t.Fatalf("expected wyze row to remain, got note id %d want %d", got[0].ID, wyzeID)
 	}
 }

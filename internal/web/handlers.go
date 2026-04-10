@@ -19,6 +19,7 @@ import (
 	"cycling-coach/internal/reporting"
 	"cycling-coach/internal/storage"
 	"cycling-coach/internal/wahoo"
+	wyzepkg "cycling-coach/internal/wyze"
 )
 
 func healthHandler(w http.ResponseWriter, r *http.Request) {
@@ -78,6 +79,78 @@ func syncHandler(syncer *wahoo.Syncer) http.HandlerFunc {
 			resp.Errors = append(resp.Errors, e.Error())
 		}
 
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(resp) //nolint:errcheck
+	}
+}
+
+// wyzeSyncHandler triggers a Wyze scale import via the sidecar-backed importer.
+// Request body: {"from":"2026-04-01","to":"2026-04-09"}
+func wyzeSyncHandler(importer *wyzepkg.Importer) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if importer == nil {
+			http.Error(w, "Wyze sidecar not configured", http.StatusServiceUnavailable)
+			return
+		}
+
+		var req struct {
+			From string `json:"from"`
+			To   string `json:"to"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, "invalid JSON: "+err.Error(), http.StatusBadRequest)
+			return
+		}
+		if req.From == "" || req.To == "" {
+			http.Error(w, "from and to are required in YYYY-MM-DD format", http.StatusBadRequest)
+			return
+		}
+
+		from, err := time.Parse("2006-01-02", req.From)
+		if err != nil {
+			http.Error(w, "from must be YYYY-MM-DD", http.StatusBadRequest)
+			return
+		}
+		to, err := time.Parse("2006-01-02", req.To)
+		if err != nil {
+			http.Error(w, "to must be YYYY-MM-DD", http.StatusBadRequest)
+			return
+		}
+		to = to.Add(24*time.Hour - time.Nanosecond)
+
+		result, err := importer.Import(r.Context(), from, to)
+		if err != nil {
+			slog.Error("wyze sync failed", "err", err)
+			http.Error(w, "wyze sync failed: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
+
+		type response struct {
+			Inserted           int      `json:"inserted"`
+			Updated            int      `json:"updated"`
+			Skipped            int      `json:"skipped"`
+			ConflictWithManual int      `json:"conflict_with_manual"`
+			Errors             []string `json:"errors,omitempty"`
+		}
+		resp := response{
+			Inserted:           result.Inserted,
+			Updated:            result.Updated,
+			Skipped:            result.Skipped,
+			ConflictWithManual: result.ConflictWithManual,
+		}
+		for _, e := range result.Errors {
+			resp.Errors = append(resp.Errors, e.Error())
+		}
+		slog.Info(
+			"wyze sync completed",
+			"from", from.Format("2006-01-02"),
+			"to", to.Format(time.RFC3339),
+			"inserted", result.Inserted,
+			"updated", result.Updated,
+			"skipped", result.Skipped,
+			"conflict_with_manual", result.ConflictWithManual,
+			"errors", len(result.Errors),
+		)
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(resp) //nolint:errcheck
 	}
@@ -489,24 +562,243 @@ func bodyMetricsHandler(db *sql.DB) http.HandlerFunc {
 		}
 
 		type dataPoint struct {
+			Timestamp    string   `json:"timestamp"`
 			Date         string   `json:"date"`
 			WeightKG     *float64 `json:"weight_kg,omitempty"`
 			BodyFatPct   *float64 `json:"body_fat_pct,omitempty"`
 			MuscleMassKG *float64 `json:"muscle_mass_kg,omitempty"`
+			BodyWaterPct *float64 `json:"body_water_pct,omitempty"`
+			BMRKcal      *float64 `json:"bmr_kcal,omitempty"`
 		}
 
 		out := make([]dataPoint, 0, len(notes))
 		for _, n := range notes {
 			out = append(out, dataPoint{
+				Timestamp:    n.Timestamp.Format(time.RFC3339),
 				Date:         n.Timestamp.Format("2006-01-02"),
 				WeightKG:     n.WeightKG,
 				BodyFatPct:   n.BodyFatPct,
 				MuscleMassKG: n.MuscleMassKG,
+				BodyWaterPct: n.BodyWaterPct,
+				BMRKcal:      n.BMRKcal,
 			})
 		}
 
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(out) //nolint:errcheck
+	}
+}
+
+// listWyzeConflictsHandler returns tracked conflict_with_manual duplicates for curl-based review.
+func listWyzeConflictsHandler(db *sql.DB) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		conflicts, err := storage.ListWyzeScaleConflicts(db, 500)
+		if err != nil {
+			slog.Error("listWyzeConflictsHandler", "err", err)
+			http.Error(w, "internal error", http.StatusInternalServerError)
+			return
+		}
+
+		type noteJSON struct {
+			ID           int64    `json:"id"`
+			Timestamp    string   `json:"timestamp"`
+			Type         string   `json:"type"`
+			WeightKG     *float64 `json:"weight_kg,omitempty"`
+			BodyFatPct   *float64 `json:"body_fat_pct,omitempty"`
+			MuscleMassKG *float64 `json:"muscle_mass_kg,omitempty"`
+			BodyWaterPct *float64 `json:"body_water_pct,omitempty"`
+			BMRKcal      *float64 `json:"bmr_kcal,omitempty"`
+		}
+		type conflictJSON struct {
+			ID           int64    `json:"id"`
+			WyzeRecordID string   `json:"wyze_record_id"`
+			ConflictType string   `json:"conflict_type"`
+			CreatedAt    string   `json:"created_at"`
+			Manual       noteJSON `json:"manual"`
+			Wyze         noteJSON `json:"wyze"`
+		}
+
+		out := make([]conflictJSON, 0, len(conflicts))
+		for _, c := range conflicts {
+			out = append(out, conflictJSON{
+				ID:           c.ID,
+				WyzeRecordID: c.WyzeRecordID,
+				ConflictType: c.ConflictType,
+				CreatedAt:    c.CreatedAt.Format(time.RFC3339),
+				Manual: noteJSON{
+					ID:           c.ManualNote.ID,
+					Timestamp:    c.ManualNote.Timestamp.Format(time.RFC3339),
+					Type:         string(c.ManualNote.Type),
+					WeightKG:     c.ManualNote.WeightKG,
+					BodyFatPct:   c.ManualNote.BodyFatPct,
+					MuscleMassKG: c.ManualNote.MuscleMassKG,
+					BodyWaterPct: c.ManualNote.BodyWaterPct,
+					BMRKcal:      c.ManualNote.BMRKcal,
+				},
+				Wyze: noteJSON{
+					ID:           c.WyzeNote.ID,
+					Timestamp:    c.WyzeNote.Timestamp.Format(time.RFC3339),
+					Type:         string(c.WyzeNote.Type),
+					WeightKG:     c.WyzeNote.WeightKG,
+					BodyFatPct:   c.WyzeNote.BodyFatPct,
+					MuscleMassKG: c.WyzeNote.MuscleMassKG,
+					BodyWaterPct: c.WyzeNote.BodyWaterPct,
+					BMRKcal:      c.WyzeNote.BMRKcal,
+				},
+			})
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(out) //nolint:errcheck
+	}
+}
+
+// listWyzeRecordsHandler returns body-metric rows with optional Wyze and conflict details.
+func listWyzeRecordsHandler(db *sql.DB) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		var from, to time.Time
+		if fromStr := r.URL.Query().Get("from"); fromStr != "" {
+			t, err := time.Parse("2006-01-02", fromStr)
+			if err != nil {
+				http.Error(w, "from must be YYYY-MM-DD", http.StatusBadRequest)
+				return
+			}
+			from = t
+		}
+		if toStr := r.URL.Query().Get("to"); toStr != "" {
+			t, err := time.Parse("2006-01-02", toStr)
+			if err != nil {
+				http.Error(w, "to must be YYYY-MM-DD", http.StatusBadRequest)
+				return
+			}
+			to = t.Add(24*time.Hour - time.Nanosecond)
+		}
+
+		records, err := storage.ListBodyMetricRecords(db, from, to, 200)
+		if err != nil {
+			slog.Error("listWyzeRecordsHandler", "err", err)
+			http.Error(w, "internal error", http.StatusInternalServerError)
+			return
+		}
+
+		type noteSummary struct {
+			ID           int64    `json:"id"`
+			Timestamp    string   `json:"timestamp"`
+			WeightKG     *float64 `json:"weight_kg,omitempty"`
+			BodyFatPct   *float64 `json:"body_fat_pct,omitempty"`
+			MuscleMassKG *float64 `json:"muscle_mass_kg,omitempty"`
+			BodyWaterPct *float64 `json:"body_water_pct,omitempty"`
+			BMRKcal      *float64 `json:"bmr_kcal,omitempty"`
+		}
+		type recordResponse struct {
+			Source       string       `json:"source"`
+			NoteID       int64        `json:"note_id"`
+			WyzeRecordID *string      `json:"wyze_record_id,omitempty"`
+			MeasuredAt   string       `json:"measured_at"`
+			ConflictID   *int64       `json:"conflict_id,omitempty"`
+			ConflictType *string      `json:"conflict_type,omitempty"`
+			Wyze         noteSummary  `json:"wyze"`
+			Manual       *noteSummary `json:"manual,omitempty"`
+		}
+
+		resp := make([]recordResponse, 0, len(records))
+		for _, rec := range records {
+			row := recordResponse{
+				Source:       rec.Source,
+				NoteID:       rec.Note.ID,
+				WyzeRecordID: rec.WyzeRecordID,
+				MeasuredAt:   rec.Note.Timestamp.Format(time.RFC3339),
+				ConflictID:   rec.ConflictID,
+				ConflictType: rec.ConflictType,
+				Wyze: noteSummary{
+					ID:           rec.Note.ID,
+					Timestamp:    rec.Note.Timestamp.Format(time.RFC3339),
+					WeightKG:     rec.Note.WeightKG,
+					BodyFatPct:   rec.Note.BodyFatPct,
+					MuscleMassKG: rec.Note.MuscleMassKG,
+					BodyWaterPct: rec.Note.BodyWaterPct,
+					BMRKcal:      rec.Note.BMRKcal,
+				},
+			}
+			if rec.Counterpart != nil {
+				row.Manual = &noteSummary{
+					ID:           rec.Counterpart.ID,
+					Timestamp:    rec.Counterpart.Timestamp.Format(time.RFC3339),
+					WeightKG:     rec.Counterpart.WeightKG,
+					BodyFatPct:   rec.Counterpart.BodyFatPct,
+					MuscleMassKG: rec.Counterpart.MuscleMassKG,
+					BodyWaterPct: rec.Counterpart.BodyWaterPct,
+					BMRKcal:      rec.Counterpart.BMRKcal,
+				}
+			}
+			resp = append(resp, row)
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(resp) //nolint:errcheck
+	}
+}
+
+// deleteWyzeConflictEntryHandler resolves a tracked conflict by deleting either the manual or Wyze note.
+// DELETE /api/wyze/conflicts/{id}?side=manual|wyze
+func deleteWyzeConflictEntryHandler(db *sql.DB) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		idStr := chi.URLParam(r, "id")
+		id, err := strconv.ParseInt(idStr, 10, 64)
+		if err != nil || id <= 0 {
+			http.Error(w, "invalid conflict id", http.StatusBadRequest)
+			return
+		}
+		side := r.URL.Query().Get("side")
+		if side != "manual" && side != "wyze" {
+			http.Error(w, "side must be manual or wyze", http.StatusBadRequest)
+			return
+		}
+
+		if err := storage.DeleteWyzeConflictEntry(db, id, side); err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				http.Error(w, "not found", http.StatusNotFound)
+				return
+			}
+			slog.Error("deleteWyzeConflictEntryHandler", "id", id, "side", side, "err", err)
+			http.Error(w, "delete failed: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]any{ //nolint:errcheck
+			"status":      "deleted",
+			"conflict_id": id,
+			"side":        side,
+		})
+	}
+}
+
+// deleteWyzeRecordHandler deletes a row from the Wyze records table by note id.
+// DELETE /api/wyze/records/{id}?source=manual|wyze
+func deleteWyzeRecordHandler(db *sql.DB) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		id, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
+		if err != nil || id <= 0 {
+			http.Error(w, "invalid id", http.StatusBadRequest)
+			return
+		}
+		source := r.URL.Query().Get("source")
+		if source != "manual" && source != "wyze" {
+			http.Error(w, "source must be manual or wyze", http.StatusBadRequest)
+			return
+		}
+		if err := storage.DeleteBodyMetricRecord(db, id, source); err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				http.Error(w, "record not found", http.StatusNotFound)
+				return
+			}
+			slog.Error("deleteWyzeRecordHandler", "id", id, "source", source, "err", err)
+			http.Error(w, "delete failed: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("ok"))
 	}
 }
 
@@ -520,6 +812,8 @@ func createNoteHandler(db *sql.DB) http.HandlerFunc {
 			WeightKG     *float64 `json:"weight_kg"`
 			BodyFatPct   *float64 `json:"body_fat_pct"`
 			MuscleMassKG *float64 `json:"muscle_mass_kg"`
+			BodyWaterPct *float64 `json:"body_water_pct"`
+			BMRKcal      *float64 `json:"bmr_kcal"`
 			Note         *string  `json:"note"`
 			WorkoutID    *int64   `json:"workout_id"`
 			Timestamp    string   `json:"timestamp"`
@@ -557,6 +851,8 @@ func createNoteHandler(db *sql.DB) http.HandlerFunc {
 			WeightKG:     req.WeightKG,
 			BodyFatPct:   req.BodyFatPct,
 			MuscleMassKG: req.MuscleMassKG,
+			BodyWaterPct: req.BodyWaterPct,
+			BMRKcal:      req.BMRKcal,
 			Note:         req.Note,
 			WorkoutID:    req.WorkoutID,
 		})
@@ -611,6 +907,8 @@ func listNotesHandler(db *sql.DB) http.HandlerFunc {
 			WeightKG     *float64 `json:"weight_kg,omitempty"`
 			BodyFatPct   *float64 `json:"body_fat_pct,omitempty"`
 			MuscleMassKG *float64 `json:"muscle_mass_kg,omitempty"`
+			BodyWaterPct *float64 `json:"body_water_pct,omitempty"`
+			BMRKcal      *float64 `json:"bmr_kcal,omitempty"`
 			Note         *string  `json:"note,omitempty"`
 			WorkoutID    *int64   `json:"workout_id,omitempty"`
 		}
@@ -625,6 +923,8 @@ func listNotesHandler(db *sql.DB) http.HandlerFunc {
 				WeightKG:     n.WeightKG,
 				BodyFatPct:   n.BodyFatPct,
 				MuscleMassKG: n.MuscleMassKG,
+				BodyWaterPct: n.BodyWaterPct,
+				BMRKcal:      n.BMRKcal,
 				Note:         n.Note,
 				WorkoutID:    n.WorkoutID,
 			})
@@ -652,6 +952,8 @@ func updateNoteHandler(db *sql.DB) http.HandlerFunc {
 			WeightKG     *float64 `json:"weight_kg"`
 			BodyFatPct   *float64 `json:"body_fat_pct"`
 			MuscleMassKG *float64 `json:"muscle_mass_kg"`
+			BodyWaterPct *float64 `json:"body_water_pct"`
+			BMRKcal      *float64 `json:"bmr_kcal"`
 			Note         *string  `json:"note"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -672,6 +974,8 @@ func updateNoteHandler(db *sql.DB) http.HandlerFunc {
 			WeightKG:     req.WeightKG,
 			BodyFatPct:   req.BodyFatPct,
 			MuscleMassKG: req.MuscleMassKG,
+			BodyWaterPct: req.BodyWaterPct,
+			BMRKcal:      req.BMRKcal,
 			Note:         req.Note,
 		}
 

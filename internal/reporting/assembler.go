@@ -83,6 +83,8 @@ func AssembleInput(ctx context.Context, db *sql.DB, profilePath string, reportTy
 			WeightKG:     n.WeightKG,
 			BodyFatPct:   n.BodyFatPct,
 			MuscleMassKG: n.MuscleMassKG,
+			BodyWaterPct: n.BodyWaterPct,
+			BMRKcal:      n.BMRKcal,
 			Text:         n.Note,
 		})
 	}
@@ -208,6 +210,36 @@ func BuildPrompt(input *ReportInput) string {
 	}
 
 	if len(input.Notes) > 0 {
+		bodyMetrics := make([]NoteSummary, 0)
+		for _, n := range input.Notes {
+			if n.WeightKG != nil || n.BodyFatPct != nil || n.MuscleMassKG != nil || n.BodyWaterPct != nil || n.BMRKcal != nil {
+				bodyMetrics = append(bodyMetrics, n)
+			}
+		}
+		if len(bodyMetrics) > 0 {
+			b.WriteString("## Body metrics\n\n")
+			for _, n := range bodyMetrics {
+				fmt.Fprintf(&b, "- %s", n.Timestamp.Format("2006-01-02 15:04"))
+				if n.WeightKG != nil {
+					fmt.Fprintf(&b, " weight=%.1fkg", *n.WeightKG)
+				}
+				if n.BodyFatPct != nil {
+					fmt.Fprintf(&b, " bf=%.1f%%", *n.BodyFatPct)
+				}
+				if n.MuscleMassKG != nil {
+					fmt.Fprintf(&b, " muscle=%.1fkg", *n.MuscleMassKG)
+				}
+				if n.BodyWaterPct != nil {
+					fmt.Fprintf(&b, " water=%.1f%%", *n.BodyWaterPct)
+				}
+				if n.BMRKcal != nil {
+					fmt.Fprintf(&b, " bmr=%.0fkcal", *n.BMRKcal)
+				}
+				b.WriteString("\n")
+			}
+			b.WriteString("\n")
+		}
+
 		b.WriteString("## Athlete notes\n\n")
 		for _, n := range input.Notes {
 			fmt.Fprintf(&b, "- %s [%s]", n.Timestamp.Format("2006-01-02 15:04"), string(n.Type))
@@ -222,6 +254,12 @@ func BuildPrompt(input *ReportInput) string {
 			}
 			if n.MuscleMassKG != nil {
 				fmt.Fprintf(&b, " muscle=%.1fkg", *n.MuscleMassKG)
+			}
+			if n.BodyWaterPct != nil {
+				fmt.Fprintf(&b, " water=%.1f%%", *n.BodyWaterPct)
+			}
+			if n.BMRKcal != nil {
+				fmt.Fprintf(&b, " bmr=%.0fkcal", *n.BMRKcal)
 			}
 			if n.Text != nil && *n.Text != "" {
 				fmt.Fprintf(&b, " — %s", *n.Text)

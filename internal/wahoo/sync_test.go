@@ -3,14 +3,15 @@ package wahoo
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
-	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 )
 
-// newMockAPIServer starts a test HTTP server that always returns the given workouts.
-func newMockAPIServer(t *testing.T, workouts []APIWorkout) *httptest.Server {
+// newMockAPIClient creates an HTTP client that always returns the given workouts.
+func newMockAPIClient(t *testing.T, workouts []APIWorkout) *http.Client {
 	t.Helper()
 	body, err := json.Marshal(WorkoutListResponse{
 		Workouts: workouts,
@@ -19,12 +20,15 @@ func newMockAPIServer(t *testing.T, workouts []APIWorkout) *httptest.Server {
 		PerPage:  30,
 	})
 	if err != nil {
-		t.Fatalf("newMockAPIServer: marshal: %v", err)
+		t.Fatalf("newMockAPIClient: marshal: %v", err)
 	}
-	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		w.Write(body) //nolint:errcheck
-	}))
+	return &http.Client{Transport: wahooSyncRoundTripFunc(func(r *http.Request) (*http.Response, error) {
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     make(http.Header),
+			Body:       io.NopCloser(strings.NewReader(string(body))),
+		}, nil
+	})}
 }
 
 func testWorkouts() []APIWorkout {
@@ -54,10 +58,8 @@ func testWorkouts() []APIWorkout {
 
 func TestSyncer_Sync_InsertsNewWorkouts(t *testing.T) {
 	db := openTestDB(t)
-	server := newMockAPIServer(t, testWorkouts())
-	defer server.Close()
 
-	client := newClientForTest(server.Client(), server.URL)
+	client := newClientForTest(newMockAPIClient(t, testWorkouts()), "https://example.test")
 	syncer := NewSyncer(client, db, t.TempDir())
 
 	result, err := syncer.Sync(context.Background(), SyncOptions{})
@@ -78,10 +80,8 @@ func TestSyncer_Sync_InsertsNewWorkouts(t *testing.T) {
 
 func TestSyncer_Sync_Idempotent(t *testing.T) {
 	db := openTestDB(t)
-	server := newMockAPIServer(t, testWorkouts())
-	defer server.Close()
 
-	client := newClientForTest(server.Client(), server.URL)
+	client := newClientForTest(newMockAPIClient(t, testWorkouts()), "https://example.test")
 	syncer := NewSyncer(client, db, t.TempDir())
 
 	// First sync: both workouts are new.
@@ -107,12 +107,10 @@ func TestSyncer_Sync_PartialUpdate(t *testing.T) {
 	db := openTestDB(t)
 
 	// First sync with one workout.
-	server1 := newMockAPIServer(t, testWorkouts()[:1])
-	client1 := newClientForTest(server1.Client(), server1.URL)
+	client1 := newClientForTest(newMockAPIClient(t, testWorkouts()[:1]), "https://example.test")
 	syncer1 := NewSyncer(client1, db, t.TempDir())
 
 	r1, err := syncer1.Sync(context.Background(), SyncOptions{})
-	server1.Close()
 	if err != nil {
 		t.Fatalf("first Sync: %v", err)
 	}
@@ -121,12 +119,10 @@ func TestSyncer_Sync_PartialUpdate(t *testing.T) {
 	}
 
 	// Second sync with both workouts: one new, one existing.
-	server2 := newMockAPIServer(t, testWorkouts())
-	client2 := newClientForTest(server2.Client(), server2.URL)
+	client2 := newClientForTest(newMockAPIClient(t, testWorkouts()), "https://example.test")
 	syncer2 := NewSyncer(client2, db, t.TempDir())
 
 	r2, err := syncer2.Sync(context.Background(), SyncOptions{})
-	server2.Close()
 	if err != nil {
 		t.Fatalf("second Sync: %v", err)
 	}
@@ -137,10 +133,8 @@ func TestSyncer_Sync_PartialUpdate(t *testing.T) {
 
 func TestSyncer_Sync_EmptyResponse(t *testing.T) {
 	db := openTestDB(t)
-	server := newMockAPIServer(t, []APIWorkout{})
-	defer server.Close()
 
-	client := newClientForTest(server.Client(), server.URL)
+	client := newClientForTest(newMockAPIClient(t, []APIWorkout{}), "https://example.test")
 	syncer := NewSyncer(client, db, t.TempDir())
 
 	result, err := syncer.Sync(context.Background(), SyncOptions{})
@@ -213,4 +207,10 @@ func TestToWorkout_ZeroSummaryFieldsAreNil(t *testing.T) {
 	if got.AvgCadence != nil {
 		t.Errorf("AvgCadence should be nil when API value is 0, got %v", got.AvgCadence)
 	}
+}
+
+type wahooSyncRoundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f wahooSyncRoundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) {
+	return f(r)
 }

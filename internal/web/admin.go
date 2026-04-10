@@ -151,6 +151,7 @@ var adminTmpl = template.Must(template.New("admin").Funcs(template.FuncMap{
   <div class="tab{{if eq .ActiveTab "actions"}} active{{end}}" onclick="switchTab('actions')">Actions</div>
   <div class="tab{{if eq .ActiveTab "workouts"}} active{{end}}" onclick="switchTab('workouts')">Workouts</div>
   <div class="tab{{if eq .ActiveTab "reports"}} active{{end}}" onclick="switchTab('reports')">Reports & Plans</div>
+  <div class="tab{{if eq .ActiveTab "wyze"}} active{{end}}" onclick="switchTab('wyze')">Wyze Sync</div>
   <div class="tab{{if eq .ActiveTab "body"}} active{{end}}" onclick="switchTab('body')">Body Metrics</div>
   <div class="tab{{if eq .ActiveTab "progress"}} active{{end}}" onclick="switchTab('progress')">Progress</div>
   <div class="tab{{if eq .ActiveTab "logs"}} active{{end}}" onclick="switchTab('logs')">Logs</div>
@@ -238,6 +239,79 @@ var adminTmpl = template.Must(template.New("admin").Funcs(template.FuncMap{
 
 </div><!-- /tab-actions -->
 
+<!-- ==================== WYZE TAB ==================== -->
+<div class="tab-pane{{if eq .ActiveTab "wyze"}} active{{end}}" id="tab-wyze">
+<div class="card">
+  <h2>Wyze Scale Sync</h2>
+  <div class="row">
+    <div class="field"><label>From</label><input type="date" id="wyze-from"></div>
+    <div class="field"><label>To</label><input type="date" id="wyze-to"></div>
+    <button id="wyze-sync-btn" onclick="runWyzeSync()"><span class="spinner" id="wyze-sync-spin"></span>Sync Wyze</button>
+  </div>
+  <p class="hint" style="margin-top:8px">Imports Wyze scale records for the selected period. If a nearby manual body-metric entry exists, the Wyze row is still imported and tracked as <code>conflict_with_manual</code>.</p>
+  <div class="result" id="wyze-sync-result"></div>
+</div>
+
+<div class="card">
+  <h2>Wyze Records</h2>
+  <form method="get" action="/admin" class="filter-form">
+    <input type="hidden" name="tab" value="wyze">
+    <div class="field"><label>From</label><input type="date" name="wyze_from" value="{{.WyzeFilterFrom}}"></div>
+    <div class="field"><label>To</label><input type="date" name="wyze_to" value="{{.WyzeFilterTo}}"></div>
+    <button type="submit">Filter</button>
+    <a href="/admin?tab=wyze"><button type="button" class="secondary">Reset</button></a>
+  </form>
+  <p class="hint" style="margin-bottom:12px">All imported Wyze rows are listed here. If a record has a nearby manual body-metric entry, it is marked as a conflict and can be resolved with the delete actions.</p>
+  <div style="overflow-x:auto">
+  <table>
+    <thead><tr>
+      <th>ID</th><th>Measured</th><th>Source</th><th>Record / Note</th><th>Entry</th><th>Conflict</th><th>Delete</th>
+    </tr></thead>
+    <tbody id="wyze-conflicts-body">
+    {{if .WyzeRecords}}
+    {{range .WyzeRecords}}
+    <tr id="wyze-record-{{.Note.ID}}">
+      <td>#{{.Note.ID}}</td>
+      <td style="white-space:nowrap">{{fmtDate .Note.Timestamp}}</td>
+      <td><span class="badge {{if eq .Source "wyze"}}green{{else}}grey{{end}}">{{.Source}}</span></td>
+      <td style="white-space:nowrap">{{if eq .Source "wyze"}}{{if .WyzeRecordID}}{{.WyzeRecordID}}<br>{{end}}{{end}}<span class="hint">note #{{.Note.ID}}</span></td>
+      <td>
+        {{fmtOpt .Note.WeightKG "%.1f kg"}}
+        · {{fmtOpt .Note.BodyFatPct "%.1f%% bf"}}
+        · {{fmtOpt .Note.MuscleMassKG "%.1f kg muscle"}}
+        · {{fmtOpt .Note.BodyWaterPct "%.1f%% water"}}
+        · {{fmtOpt .Note.BMRKcal "%.0f bmr"}}
+      </td>
+      <td>
+        {{if .ConflictID}}
+        <span class="badge yellow">#{{.ConflictID}} conflict</span>
+        {{else if .Counterpart}}
+        <span class="badge yellow">duplicate of #{{.Counterpart.ID}}</span>
+        {{else}}
+        <span class="badge grey">none</span>
+        {{end}}
+      </td>
+      <td>
+        {{if or .ConflictID .Counterpart}}
+        <button class="act-btn danger" onclick="deleteWyzeRecord({{.Note.ID}}, '{{.Source}}')">Delete</button>
+        {{else}}
+        <span style="color:#888">—</span>
+        {{end}}
+      </td>
+    </tr>
+    {{end}}
+    {{else}}
+    <tr id="wyze-conflicts-empty-row">
+      <td colspan="7" style="color:#888;font-size:.9rem">No body-metric records found for this filter.</td>
+    </tr>
+    {{end}}
+    </tbody>
+  </table>
+  </div>
+  <div class="result" id="wyze-conflict-result"></div>
+</div>
+</div><!-- /tab-wyze -->
+
 <!-- ==================== WORKOUTS TAB ==================== -->
 <div class="tab-pane{{if eq .ActiveTab "workouts"}} active{{end}}" id="tab-workouts">
 <div class="card">
@@ -249,6 +323,7 @@ var adminTmpl = template.Must(template.New("admin").Funcs(template.FuncMap{
     <button type="submit">Filter</button>
     <a href="/admin?tab=workouts"><button type="button" class="secondary">Reset</button></a>
   </form>
+  <p class="hint" style="margin-bottom:12px">Default view is the last 8 weeks when no filter is set.</p>
   {{if .Workouts}}
   <div style="overflow-x:auto">
   <table>
@@ -361,8 +436,10 @@ var adminTmpl = template.Must(template.New("admin").Funcs(template.FuncMap{
     <canvas id="chart-weight" height="200"></canvas>
     <canvas id="chart-bodyfat" style="margin-top:20px" height="200"></canvas>
     <canvas id="chart-muscle" style="margin-top:20px" height="200"></canvas>
+    <canvas id="chart-water" style="margin-top:20px" height="200"></canvas>
+    <canvas id="chart-bmr" style="margin-top:20px" height="200"></canvas>
   </div>
-  <p id="body-empty" style="display:none;color:#888;font-size:.9rem">No body metrics recorded yet. Use the Telegram bot to log weight, body fat, and muscle mass.</p>
+  <p id="body-empty" style="display:none;color:#888;font-size:.9rem">No body metrics recorded yet. Use Telegram or Wyze sync to log weight, body fat, muscle mass, hydration, and BMR.</p>
 </div>
 </div><!-- /tab-body -->
 
@@ -440,7 +517,7 @@ var adminTmpl = template.Must(template.New("admin").Funcs(template.FuncMap{
 </div>
 
 <script>
-var tabNames = ['actions','workouts','reports','body','progress','logs'];
+var tabNames = ['actions','workouts','reports','wyze','body','progress','logs'];
 function switchTab(name) {
   document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
   document.querySelectorAll('.tab-pane').forEach(p => p.classList.remove('active'));
@@ -505,6 +582,128 @@ async function runSync() {
     }
   } catch(e) { showResult('sync-result', false, e.toString()); }
   finally { setLoading('sync-btn', 'sync-spin', false); }
+}
+
+async function runWyzeSync() {
+  const from = document.getElementById('wyze-from').value;
+  const to = document.getElementById('wyze-to').value;
+  if (!from || !to) {
+    showResult('wyze-sync-result', false, 'Please set both From and To dates.');
+    return;
+  }
+  setLoading('wyze-sync-btn', 'wyze-sync-spin', true);
+  try {
+    const r = await fetch('/api/wyze/sync', {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({from: from, to: to})
+    });
+    const text = await r.text();
+    let j = {};
+    try { j = JSON.parse(text); } catch (_) {}
+    if (!r.ok) {
+      showResult('wyze-sync-result', false, (text || 'Wyze sync failed.'));
+      return;
+    }
+    showResult(
+      'wyze-sync-result',
+      true,
+      'Inserted: ' + j.inserted + ' Updated: ' + j.updated + ' Skipped: ' + j.skipped +
+      ' conflict_with_manual: ' + j.conflict_with_manual
+    );
+    await refreshWyzeConflicts();
+    loadBodyCharts(true);
+  } catch(e) {
+    showResult('wyze-sync-result', false, e.toString());
+  } finally {
+    setLoading('wyze-sync-btn', 'wyze-sync-spin', false);
+  }
+}
+
+async function deleteWyzeConflict(id, side) {
+  if (!confirm('Delete the ' + side + ' entry for conflict #' + id + '?')) return;
+  try {
+    const r = await fetch('/api/wyze/conflicts/' + id + '?side=' + side, {method: 'DELETE'});
+    const text = await r.text();
+    if (!r.ok) {
+      showResult('wyze-conflict-result', false, text || 'Delete failed.');
+      return;
+    }
+    await refreshWyzeConflicts();
+    showResult('wyze-conflict-result', true, 'Deleted ' + side + ' entry for conflict #' + id + '.');
+  } catch(e) {
+    showResult('wyze-conflict-result', false, e.toString());
+  }
+}
+
+async function deleteWyzeRecord(id, source) {
+  if (!confirm('Delete ' + source + ' record #' + id + '? This cannot be undone.')) return;
+  try {
+    const r = await fetch('/api/wyze/records/' + id + '?source=' + source, {method: 'DELETE'});
+    const text = await r.text();
+    if (!r.ok) {
+      showResult('wyze-conflict-result', false, text || 'Delete failed.');
+      return;
+    }
+    await refreshWyzeConflicts();
+    loadBodyCharts(true);
+    showResult('wyze-conflict-result', true, 'Deleted ' + source + ' record #' + id + '.');
+  } catch(e) {
+    showResult('wyze-conflict-result', false, e.toString());
+  }
+}
+
+function fmtWyzeMetric(value, suffix, decimals) {
+  if (value === null || value === undefined) return '<span style="color:#ccc">—</span>';
+  return Number(value).toFixed(decimals) + suffix;
+}
+
+function renderWyzeConflicts(conflicts) {
+  const tbody = document.getElementById('wyze-conflicts-body');
+  if (!tbody) return;
+  if (!conflicts || conflicts.length === 0) {
+    tbody.innerHTML = '<tr id="wyze-conflicts-empty-row"><td colspan="7" style="color:#888;font-size:.9rem">No body-metric records found for this filter.</td></tr>';
+    return;
+  }
+
+  tbody.innerHTML = conflicts.map(function(c) {
+    const manual = c.manual || {};
+    const wyze = c.wyze || {};
+    const measuredAt = c.measured_at ? String(c.measured_at).slice(0, 10) : '—';
+    return '<tr id="wyze-record-' + (c.note_id || 'x') + '">'
+      + '<td>#' + (c.note_id || '—') + '</td>'
+      + '<td style="white-space:nowrap">' + escHtml(measuredAt) + '</td>'
+      + '<td><span class="badge ' + (c.source === 'wyze' ? 'green' : 'grey') + '">' + escHtml(c.source || 'manual') + '</span></td>'
+      + '<td style="white-space:nowrap">' + (c.source === 'wyze' && c.wyze_record_id ? escHtml(c.wyze_record_id) + '<br>' : '') + '<span class="hint">note #' + (wyze.id || '—') + '</span></td>'
+      + '<td>'
+      + fmtWyzeMetric(wyze.weight_kg, ' kg', 1) + ' · '
+      + fmtWyzeMetric(wyze.body_fat_pct, '% bf', 1) + ' · '
+      + fmtWyzeMetric(wyze.muscle_mass_kg, ' kg muscle', 1) + ' · '
+      + fmtWyzeMetric(wyze.body_water_pct, '% water', 1) + ' · '
+      + fmtWyzeMetric(wyze.bmr_kcal, ' bmr', 0) + '</td>'
+      + '<td>' + (c.conflict_id ? '<span class="badge yellow">#' + c.conflict_id + ' conflict</span>' : (manual.id ? '<span class="badge yellow">duplicate of #' + manual.id + '</span>' : '<span class="badge grey">none</span>')) + '</td>'
+      + '<td>' + ((c.conflict_id || manual.id) ? '<button class="act-btn danger" onclick="deleteWyzeRecord(' + (c.note_id || '0') + ', \'' + escHtml(c.source || 'manual') + '\')">Delete</button>' : '<span style="color:#888">—</span>') + '</td>'
+      + '</tr>';
+  }).join('');
+}
+
+async function refreshWyzeConflicts() {
+  try {
+    const qs = new URLSearchParams();
+    const from = document.querySelector('input[name="wyze_from"]');
+    const to = document.querySelector('input[name="wyze_to"]');
+    if (from && from.value) qs.set('from', from.value);
+    if (to && to.value) qs.set('to', to.value);
+    const r = await fetch('/api/wyze/records' + (qs.toString() ? '?' + qs.toString() : ''));
+    const conflicts = await r.json();
+    if (!r.ok) {
+      showResult('wyze-conflict-result', false, 'Failed to refresh Wyze records.');
+      return;
+    }
+    renderWyzeConflicts(conflicts);
+  } catch (e) {
+    showResult('wyze-conflict-result', false, e.toString());
+  }
 }
 
 async function runProcess() {
@@ -864,6 +1063,8 @@ function loadBodyCharts(forceReload) {
   document.getElementById('chart-weight').style.display = '';
   document.getElementById('chart-bodyfat').style.display = '';
   document.getElementById('chart-muscle').style.display = '';
+  document.getElementById('chart-water').style.display = '';
+  document.getElementById('chart-bmr').style.display = '';
   document.getElementById('body-charts').style.display = '';
   document.getElementById('body-empty').style.display = 'none';
 
@@ -876,6 +1077,8 @@ function loadBodyCharts(forceReload) {
     var weightData = data.filter(d => d.weight_kg);
     var bfData = data.filter(d => d.body_fat_pct);
     var mmData = data.filter(d => d.muscle_mass_kg);
+    var waterData = data.filter(d => d.body_water_pct);
+    var bmrData = data.filter(d => d.bmr_kcal);
 
     if (weightData.length) drawChart('chart-weight', 'Weight (kg)', weightData.map(d => d.date), weightData.map(d => d.weight_kg), '#2563eb');
     else document.getElementById('chart-weight').style.display = 'none';
@@ -885,6 +1088,12 @@ function loadBodyCharts(forceReload) {
 
     if (mmData.length) drawChart('chart-muscle', 'Muscle Mass (kg)', mmData.map(d => d.date), mmData.map(d => d.muscle_mass_kg), '#22c55e');
     else document.getElementById('chart-muscle').style.display = 'none';
+
+    if (waterData.length) drawChart('chart-water', 'Hydration / Body Water (%)', waterData.map(d => d.date), waterData.map(d => d.body_water_pct), '#0891b2');
+    else document.getElementById('chart-water').style.display = 'none';
+
+    if (bmrData.length) drawChart('chart-bmr', 'BMR (kcal)', bmrData.map(d => d.date), bmrData.map(d => d.bmr_kcal), '#a16207');
+    else document.getElementById('chart-bmr').style.display = 'none';
   });
 }
 
@@ -1242,8 +1451,11 @@ initLogStream();
 type adminPageData struct {
 	Reports                 []storage.ReportWithDelivery
 	Workouts                []storage.WorkoutWithMetrics
+	WyzeRecords             []storage.BodyMetricRecordDetail
 	FilterFrom              string
 	FilterTo                string
+	WyzeFilterFrom          string
+	WyzeFilterTo            string
 	ActiveTab               string // "actions", "workouts", "reports"
 	HasPreviousClosedReport bool
 	InferredBlockStart      string
@@ -1256,9 +1468,12 @@ type adminPageData struct {
 func adminHandler(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var from, to time.Time
+		var wyzeFrom, wyzeTo time.Time
 
 		fromStr := r.URL.Query().Get("from")
 		toStr := r.URL.Query().Get("to")
+		wyzeFromStr := r.URL.Query().Get("wyze_from")
+		wyzeToStr := r.URL.Query().Get("wyze_to")
 
 		if fromStr != "" {
 			if t, err := time.Parse("2006-01-02", fromStr); err == nil {
@@ -1270,6 +1485,16 @@ func adminHandler(db *sql.DB) http.HandlerFunc {
 				to = t
 			}
 		}
+		if wyzeFromStr != "" {
+			if t, err := time.Parse("2006-01-02", wyzeFromStr); err == nil {
+				wyzeFrom = t
+			}
+		}
+		if wyzeToStr != "" {
+			if t, err := time.Parse("2006-01-02", wyzeToStr); err == nil {
+				wyzeTo = t.Add(24*time.Hour - time.Nanosecond)
+			}
+		}
 
 		// Default: last 8 weeks when no filter is provided.
 		filterFrom := fromStr
@@ -1277,6 +1502,12 @@ func adminHandler(db *sql.DB) http.HandlerFunc {
 		if from.IsZero() && to.IsZero() {
 			from = time.Now().UTC().AddDate(0, 0, -adminDefaultWeeks*7)
 			filterFrom = from.Format("2006-01-02")
+		}
+		wyzeFilterFrom := wyzeFromStr
+		wyzeFilterTo := wyzeToStr
+		if wyzeFrom.IsZero() && wyzeTo.IsZero() {
+			wyzeFrom = time.Now().UTC().AddDate(0, 0, -adminDefaultWeeks*7)
+			wyzeFilterFrom = wyzeFrom.Format("2006-01-02")
 		}
 
 		reports, err := storage.ListReportsWithDelivery(db, from, to, 100)
@@ -1295,6 +1526,12 @@ func adminHandler(db *sql.DB) http.HandlerFunc {
 		workouts, err := storage.ListWorkoutsWithMetrics(db, from, to, 200)
 		if err != nil {
 			slog.Error("adminHandler: list workouts", "err", err)
+			http.Error(w, "internal error", http.StatusInternalServerError)
+			return
+		}
+		wyzeRecords, err := storage.ListBodyMetricRecords(db, wyzeFrom, wyzeTo, 200)
+		if err != nil {
+			slog.Error("adminHandler: list wyze records", "err", err)
 			http.Error(w, "internal error", http.StatusInternalServerError)
 			return
 		}
@@ -1330,8 +1567,11 @@ func adminHandler(db *sql.DB) http.HandlerFunc {
 		data := adminPageData{
 			Reports:                 reports,
 			Workouts:                workouts,
+			WyzeRecords:             wyzeRecords,
 			FilterFrom:              filterFrom,
 			FilterTo:                filterTo,
+			WyzeFilterFrom:          wyzeFilterFrom,
+			WyzeFilterTo:            wyzeFilterTo,
 			ActiveTab:               tab,
 			HasPreviousClosedReport: latestReportErr == nil,
 			InferredBlockStart:      inferredBlockStart,

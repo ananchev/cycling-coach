@@ -13,8 +13,9 @@ A personal cycling training assistant that currently:
 3. Downloads FIT files when available
 4. Computes ride metrics from FIT files
 5. Accepts subjective notes and body metrics through Telegram
-6. Generates report/plan periods with Claude
-7. Stores rendered HTML in SQLite and optionally delivers summaries to Telegram
+6. Imports Wyze body metrics through a Python sidecar
+7. Generates report/plan periods with Claude
+8. Stores rendered HTML in SQLite and optionally delivers summaries to Telegram
 
 ## Current Stack
 
@@ -40,6 +41,7 @@ internal/analysis/   metric computation and FIT processing pipeline
 internal/reporting/  prompt assembly, Claude calls, rendering, delivery, profile evolution, progress interpretation
 internal/scheduler/  cron wiring
 internal/storage/    SQLite migrations and CRUD helpers
+internal/wyze/       Wyze sidecar client and importer
 internal/web/        router, handlers, middleware, admin UI, SSE log stream
 config/              seed athlete profile
 testdata/            sample FIT file
@@ -79,12 +81,19 @@ testdata/            sample FIT file
 - `DATABASE_PATH`
 - `FIT_FILES_PATH`
 - `ATHLETE_PROFILE_PATH`
+- `WYZE_SIDECAR_URL`
+- `WYZE_EMAIL`
+- `WYZE_PASSWORD`
+- `WYZE_KEY_ID`
+- `WYZE_API_KEY`
+- `WYZE_TOTP_KEY`
 
 ### Scheduler env vars
 
 - `CRON_SYNC`
 - `CRON_FIT_PROCESSING`
 - `CRON_WEEKLY_REPORT`
+- `CRON_WYZE_SCALE_SYNC`
 
 Important: scheduled jobs are disabled unless their corresponding cron env var is set.
 
@@ -152,6 +161,7 @@ Implemented routes:
 - `/reports/{id}`
 - `/plans/{id}`
 - `/api/sync`
+- `/api/wyze/sync`
 - `/api/process`
 - `/api/workout/reset-fit`
 - `/api/workout/ignore`
@@ -164,11 +174,15 @@ Implemented routes:
 - `/api/progress`
 - `/api/progress/interpret`
 - `/api/body-metrics`
+- `/api/wyze/conflicts`
+- `/api/wyze/records`
 - `/api/workouts/{id}/data`
 - `/api/workouts/{id}/timeseries.csv`
 - `POST /api/notes`
 - `/api/notes`
 - `/api/notes/{id}`
+- `/api/wyze/records/{id}`
+- `/api/wyze/conflicts/{id}`
 - `/api/logs/stream`
 
 Not implemented despite older docs:
@@ -194,6 +208,9 @@ These are admin display helpers only; they do not change the Claude prompt forma
 
 - workouts are shown primarily by external `wahoo_id`, not internal SQLite row id
 - body metrics support backend date filtering
+- the admin UI includes a dedicated `Wyze Sync` tab
+- the Wyze tab shows mixed manual + Wyze body-metric rows with duplicate-aware delete actions
+- body-metrics charts suppress manual rows that duplicate same-day Wyze imports
 - the primary report/plan workflow in the UI is `Close Block & Generate Next Plan`
 - the close-block workflow infers block start from the day after the latest saved report, with a one-time manual bootstrap start when no prior report exists
 - notes can be created from the admin UI as well as edited/deleted there
@@ -205,6 +222,23 @@ These are admin display helpers only; they do not change the Claude prompt forma
   - average cadence in the summary row
   - cadence distribution bands `<70`, `70-85`, `85-100`, `100+`
   - both power and HR zone timelines when the processed FIT data supports them
+
+## Current Wyze Behavior
+
+- the main Go app talks to a local Python sidecar instead of the Wyze SDK directly
+- the sidecar exposes:
+  - `GET /health`
+  - `POST /v1/scale-records/query`
+- imported Wyze rows are stored in `athlete_notes`
+- Wyze idempotency is tracked in `wyze_scale_imports`
+- explicit manual-vs-Wyze conflicts are tracked in `wyze_scale_conflicts`
+- the admin records table also infers same-day duplicates when split manual rows match a Wyze row, even if no explicit conflict row exists
+- the Claude prompt includes structured body metrics for the selected report/plan period:
+  - weight
+  - body fat
+  - muscle mass
+  - body water
+  - BMR
 
 ## Conventions
 
