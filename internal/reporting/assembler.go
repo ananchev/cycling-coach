@@ -21,7 +21,9 @@ func AssembleInput(ctx context.Context, db *sql.DB, profilePath string, reportTy
 		return nil, fmt.Errorf("reporting.AssembleInput: read profile: %w", err)
 	}
 
-	workouts, err := storage.ListWorkoutsByDateRange(db, weekStart, weekEnd)
+	queryFrom, queryTo := inclusiveDayRange(weekStart, weekEnd)
+
+	workouts, err := storage.ListWorkoutsByDateRange(db, queryFrom, queryTo)
 	if err != nil {
 		return nil, fmt.Errorf("reporting.AssembleInput: list workouts: %w", err)
 	}
@@ -69,7 +71,7 @@ func AssembleInput(ctx context.Context, db *sql.DB, profilePath string, reportTy
 		rides = append(rides, rs)
 	}
 
-	notes, err := storage.ListNotesByDateRange(db, weekStart, weekEnd)
+	notes, err := storage.ListNotesByDateRange(db, queryFrom, queryTo)
 	if err != nil {
 		return nil, fmt.Errorf("reporting.AssembleInput: list notes: %w", err)
 	}
@@ -115,6 +117,12 @@ func AssembleInput(ctx context.Context, db *sql.DB, profilePath string, reportTy
 	}
 
 	return input, nil
+}
+
+func inclusiveDayRange(from, to time.Time) (time.Time, time.Time) {
+	fromDay := time.Date(from.Year(), from.Month(), from.Day(), 0, 0, 0, 0, from.Location())
+	toDay := time.Date(to.Year(), to.Month(), to.Day(), 23, 59, 59, int(time.Second-time.Nanosecond), to.Location())
+	return fromDay, toDay
 }
 
 // BuildPrompt constructs the LLM prompt from a ReportInput.

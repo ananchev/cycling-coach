@@ -116,6 +116,49 @@ func TestAssembleInput_WithRideAndNote(t *testing.T) {
 	}
 }
 
+func TestAssembleInput_IncludesWorkoutAndNoteOnSelectedEndDate(t *testing.T) {
+	db := openTestDB(t)
+	profile := writeTempProfile(t, "FTP: 251W")
+
+	weekStart := time.Date(2026, 4, 5, 0, 0, 0, 0, time.UTC)
+	weekEnd := time.Date(2026, 4, 11, 0, 0, 0, 0, time.UTC)
+
+	wType := "cycling"
+	w := &storage.Workout{
+		WahooID:     "end-date-ride",
+		StartedAt:   time.Date(2026, 4, 11, 18, 30, 0, 0, time.UTC),
+		WorkoutType: &wType,
+		Source:      "api",
+	}
+	if _, _, err := storage.UpsertWorkout(db, w); err != nil {
+		t.Fatalf("UpsertWorkout: %v", err)
+	}
+
+	noteText := "late ride completed"
+	if _, err := storage.InsertNote(db, &storage.AthleteNote{
+		Timestamp: time.Date(2026, 4, 11, 20, 0, 0, 0, time.UTC),
+		Type:      storage.NoteTypeRide,
+		Note:      &noteText,
+	}); err != nil {
+		t.Fatalf("InsertNote: %v", err)
+	}
+
+	input, err := reporting.AssembleInput(context.Background(), db, profile, storage.ReportTypeWeeklyReport, weekStart, weekEnd)
+	if err != nil {
+		t.Fatalf("AssembleInput error: %v", err)
+	}
+
+	if len(input.Rides) != 1 {
+		t.Fatalf("expected 1 ride on selected end date, got %d", len(input.Rides))
+	}
+	if input.Rides[0].Date.Format("2006-01-02 15:04") != "2026-04-11 18:30" {
+		t.Errorf("unexpected ride date: %s", input.Rides[0].Date.Format("2006-01-02 15:04"))
+	}
+	if len(input.Notes) != 1 {
+		t.Fatalf("expected 1 note on selected end date, got %d", len(input.Notes))
+	}
+}
+
 func TestBuildPrompt_ContainsKeyFields(t *testing.T) {
 	dur := 60.0
 	avgPwr := 230.0
