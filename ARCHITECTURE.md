@@ -116,6 +116,7 @@ progress_analyses table (single saved interpretation + prompts)
 - stores generated reports
 - stores saved system/user prompts for reports, plans, and progress interpretations
 - sends Telegram deliveries
+- patches the athlete profile after each block close (recent-weeks table, milestone statuses, last-updated date)
 - evolves the athlete profile from recent report history
 - formats admin-only workout summary/zone-detail previews
 - generates progress interpretations from aggregated KPI snapshots
@@ -188,7 +189,11 @@ progress_analyses table (single saved interpretation + prompts)
 ### Reporting
 
 - report periods and plan periods share the same generation pipeline
-- the main admin workflow is now “close block -> generate report -> generate next 7-day plan”
+- the main admin workflow is now “close block -> generate report -> patch profile -> generate next 7-day plan”
+- after the report is generated, a lightweight profile patch updates three structured sections: the recent-weeks rolling table, Stelvio readiness milestone statuses, and the last-updated date
+- the patch runs automatically as part of the close-block flow so the plan benefits from the freshest profile context
+- patch failure is non-fatal — logged as a warning, plan generation continues regardless
+- the patch step only runs when the provider is a `*ClaudeProvider` (skipped in tests with stub providers)
 - reports optionally include the prior plan narrative for plan-vs-actual comparison
 - when execution extends beyond the originally planned 7-day block, the prompt explicitly tells Claude to interpret that drift
 - the Claude prompt now includes a structured body-metrics block for the selected period, including weight, body fat, muscle mass, body water, and BMR when available
@@ -297,6 +302,9 @@ Current implementation:
 - Telegram `/profile` returns the file
 - Telegram `/profile set` replaces the file with an uploaded markdown attachment
 - `/api/profile/evolve` rewrites the profile using recent reports and validates required sections
+- automatic profile patch on block close updates three structured sections without a full rewrite
+- both the patcher and evolver validate that all 8 protected section headings survive every write
+- the profile is backed up with a timestamp suffix before every patch or evolution write
 
 Current limitation:
 

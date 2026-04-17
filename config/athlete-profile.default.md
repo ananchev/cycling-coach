@@ -38,6 +38,9 @@
                                       plans and when to compare plan vs. actual
     5. "Weekly structure template"  — Skeleton for day-by-day plan prescription
     6. "Warning flags"              — Drift spike and illness signal guidance
+    7. "Recent training weeks"      — Rolling 8-week context updated automatically
+                                      by the weekly profile patch after each block close
+    8. "Stelvio readiness milestones" — Checklist tracked by the weekly profile patch
 
   You CAN update the content inside those sections (e.g. adjust zone numbers
   if FTP changes). Just do not rename or delete the headings.
@@ -73,7 +76,7 @@
 
 ## Athlete
 
-- **Goal:** Build aerobic durability, improve threshold climbing power, and support sustainable body-composition progress for a mountainous gran fondo later in the season
+- **Goal:** Summit the Stelvio Pass (July 2026) — build aerobic durability, improve threshold climbing power, and support sustainable body-composition progress
 - **FTP:** 250 W *(illustrative baseline for the default profile)*
 - **Weight:** ~78 kg
 - **W/kg:** ~3.2
@@ -124,7 +127,18 @@
 | **HR Drift (%)** | Pa:HR decoupling: (EF_first_half − EF_last_half) / EF_first_half × 100 | <5% excellent · 5–8% acceptable · >8% flag |
 | **TSS** | Training Stress Score = (duration_sec × NP × IF) / (FTP × 3600) × 100 | Single session: <75 low · 75–150 medium · >150 high |
 
-Weekly TSS benchmarks for this athlete: 300–450 is a normal training week. Above 500 warrants a recovery note. Below 250 is an easy/recovery week.
+### Athlete-specific weekly TSS benchmarks
+
+Given weekday sessions ≤60 min at IF ~0.54–0.58 and weekend rides of 90–120 min, realistic weekly TSS ranges are:
+
+| Week type | TSS range | Notes |
+|-----------|-----------|-------|
+| Recovery / travel | <150 | Expected during disruptions |
+| Light / easy | 150–200 | Deliberate deload or short week |
+| Normal training | 200–280 | Typical week with current constraints |
+| High load | 280–350 | Extended weekend ride or added intensity |
+
+Do NOT prescribe targets above 300 unless session durations are explicitly extended beyond the weekday 60 min cap.
 
 ---
 
@@ -134,6 +148,7 @@ Weekly TSS benchmarks for this athlete: 300–450 is a normal training week. Abo
 - **Diesel-type athlete:** strong steady-state, poor sprint. Needs gradual load progression — interval jumps cause failure.
 - **HR is sensitive to:** hydration, stress, sleep, illness recovery. HR drift is the primary quality signal, not average power.
 - **Cadence preference varies by context:** a moderately lower cadence may feel steadier indoors, while outdoor riding may trend higher.
+- **Cadence development needed:** Current indoor data shows 90%+ of time at <70 rpm. For sustained alpine climbing (Stelvio target), 70–75 rpm is the minimum efficient cadence. Progressively shift indoor cadence toward 75 rpm once sweetspot work is established.
 
 ### Training constraints
 - Weekday sessions: ≤ 60 minutes
@@ -172,6 +187,59 @@ Weekly TSS benchmarks for this athlete: 300–450 is a normal training week. Abo
 | Fri | Rest |
 | Sat | Long endurance 90–120 min |
 | Sun | Long endurance ± optional tempo finish |
+
+---
+
+## Recent training weeks
+
+<!-- PROTECTED — do not rename this heading -->
+<!-- Updated automatically by the weekly profile patch after each block close.
+     Keeps the last 8 rows. Oldest row is dropped when a 9th is added. -->
+
+| Week ending | TSS | Key session | Avg drift | Notes |
+|-------------|-----|-------------|-----------|-------|
+| *(no data yet — rows are added automatically after each block close)* |
+
+---
+
+## Stelvio readiness milestones
+
+<!-- PROTECTED — do not rename this heading -->
+<!-- Updated automatically by the weekly profile patch after each block close.
+     Reference these milestones in every report and plan to assess event readiness. -->
+
+Target: Stelvio Pass, July 2026
+
+| # | Milestone | Status |
+|---|-----------|--------|
+| 1 | Z2 power stable ≥140 W for 2+ consecutive weeks | ⬜ Not yet |
+| 2 | HR drift consistently <5% on 60 min Z2 sessions | ⬜ Not yet |
+| 3 | Complete 2×15 min sweetspot intervals with drift <8% | ⬜ Not yet |
+| 4 | Complete 90 min endurance ride outdoors with <6% drift | ⬜ Not yet |
+| 5 | Sustain 70–75 rpm cadence for full 60 min session | ⬜ Not yet |
+| 6 | Complete 2×20 min threshold intervals at >0.88 IF | ⬜ Not yet |
+| 7 | Complete 3+ hour outdoor ride with negative-split power | ⬜ Not yet |
+
+---
+
+## Outdoor progression plan
+
+<!-- Safe to edit — manual updates only -->
+
+### Phase targets
+
+| Phase | When | Focus |
+|-------|------|-------|
+| Indoor-only | Now → mid-May | Build base, introduce sweetspot, cadence work |
+| First outdoor rides | Mid-May → June | Limburg/Ardennes hills, adapt to outdoor pacing |
+| Outdoor build | June → early July | Extend outdoor duration, practice climbing tempo |
+| Stelvio prep | July | Taper, event-specific rehearsal |
+
+### Outdoor-specific notes
+
+- **Outdoor FTP correction:** Expect outdoor power ~5–10% lower than indoor initially due to variable terrain and thermoregulation. Do not chase indoor numbers outdoors.
+- **Stelvio pacing:** Target steady Z2-Z3 for the 24 km climb (~2 hours). Power target: 65–70% FTP. HR ceiling: Z3 upper limit. Cadence: 70–75 rpm.
+- **Thermal prep:** Stelvio starts warm at the base and cools at altitude. Practice layering strategy on longer outdoor rides.
 
 ---
 
@@ -218,13 +286,16 @@ When generating a **weekly report:**
 - Evaluate each session individually: was HR drift acceptable? Was power in the right zone for the day's goal?
 - **If a prior week plan is provided, explicitly compare prescribed vs. actual for each session** — identify compliance, deviations, and their likely cause (fatigue, travel, life, etc.)
 - Identify the week's single most important positive signal and single most important concern
+- **Reference the Stelvio readiness milestones** — note which milestones are met, which are close, and what this week's data means for event readiness
+- **Reference the Recent training weeks table** — identify multi-week trends (TSS trajectory, drift improvement, power plateau) rather than optimising only for the current week
 - Give 2–3 specific, actionable recommendations for next week
 
 When generating a **weekly plan:**
 - Prescribe each training day with: target power range (W), HR cap (bpm), duration (min), cadence guidance, and the coaching rationale
 - Rest days must be explicit with a reason
-- Total weekly TSS should respect the athlete's recent load (no >10% weekly jump unless recovering from a low week)
+- Total weekly TSS should respect the athlete's recent load and the athlete-specific TSS benchmarks (no >10% weekly jump unless recovering from a low week)
 - Factor in any known travel, fatigue notes, or illness when adjusting the prescription
+- **Reference the Stelvio readiness milestones** — orient the plan toward the next unmet milestone rather than generic progression
 
 ---
 

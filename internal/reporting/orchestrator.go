@@ -21,12 +21,14 @@ type Orchestrator struct {
 
 // CloseBlockResult is the combined output of closing a completed block and generating the next plan.
 type CloseBlockResult struct {
-	ReportID   int64
-	PlanID     int64
-	BlockStart time.Time
-	BlockEnd   time.Time
-	PlanStart  time.Time
-	PlanEnd    time.Time
+	ReportID        int64
+	PlanID          int64
+	BlockStart      time.Time
+	BlockEnd        time.Time
+	PlanStart       time.Time
+	PlanEnd         time.Time
+	ProfilePatched  bool
+	PatchBackupPath string
 }
 
 // NewOrchestrator creates an Orchestrator with the given dependencies.
@@ -119,9 +121,41 @@ func (o *Orchestrator) GenerateCloseBlock(ctx context.Context, blockEnd time.Tim
 		return nil, fmt.Errorf("reporting.Orchestrator.GenerateCloseBlock: block end %s is before inferred block start %s", blockEnd.Format("2006-01-02"), blockStart.Format("2006-01-02"))
 	}
 
+	// Assemble input first — we need the rides/metrics for both the report and the patch.
+	reportInput, err := AssembleInput(ctx, o.db, o.profilePath, storage.ReportTypeWeeklyReport, blockStart, blockEnd)
+	if err != nil {
+		return nil, fmt.Errorf("reporting.Orchestrator.GenerateCloseBlock: assemble: %w", err)
+	}
+
 	reportID, err := o.Generate(ctx, storage.ReportTypeWeeklyReport, blockStart, blockEnd, "")
 	if err != nil {
 		return nil, fmt.Errorf("reporting.Orchestrator.GenerateCloseBlock: weekly report: %w", err)
+	}
+
+	// Attempt weekly profile patch between report and plan generation.
+	// The patch updates rolling context so the plan benefits from the freshest profile.
+	// Patch failure is non-fatal — log and continue with plan generation.
+	var profilePatched bool
+	var patchBackupPath string
+	if cp, ok := o.provider.(*ClaudeProvider); ok {
+		report, getErr := storage.GetReportByID(o.db, reportID)
+		if getErr != nil {
+			slog.Warn("reporting: could not fetch report for profile patch", "err", getErr)
+		} else {
+			narrative := ""
+			if report.NarrativeText != nil {
+				narrative = *report.NarrativeText
+			}
+			weekMetrics := ComputeWeekMetrics(reportInput)
+			patchResult, patchErr := PatchProfile(ctx, o.profilePath, cp, narrative, weekMetrics)
+			if patchErr != nil {
+				slog.Warn("reporting: profile patch failed (non-fatal, continuing with plan)", "err", patchErr)
+			} else {
+				profilePatched = true
+				patchBackupPath = patchResult.BackupPath
+				slog.Info("reporting: profile patched after block close", "backup", patchResult.BackupPath)
+			}
+		}
 	}
 
 	planStart := blockEnd.AddDate(0, 0, 1)
@@ -132,12 +166,14 @@ func (o *Orchestrator) GenerateCloseBlock(ctx context.Context, blockEnd time.Tim
 	}
 
 	return &CloseBlockResult{
-		ReportID:   reportID,
-		PlanID:     planID,
-		BlockStart: blockStart,
-		BlockEnd:   blockEnd,
-		PlanStart:  planStart,
-		PlanEnd:    planEnd,
+		ReportID:        reportID,
+		PlanID:          planID,
+		BlockStart:      blockStart,
+		BlockEnd:        blockEnd,
+		PlanStart:       planStart,
+		PlanEnd:         planEnd,
+		ProfilePatched:  profilePatched,
+		PatchBackupPath: patchBackupPath,
 	}, nil
 }
 

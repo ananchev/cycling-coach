@@ -20,16 +20,21 @@ That execution -> report -> next plan loop is the main feature of the app.
 
 The athlete profile is the base context for this loop. It is stored as markdown, sent to Claude during report and plan generation, and acts as the long-lived coaching memory for the app. It describes things like goals, constraints, zone interpretation, training philosophy, warning flags, and current phase.
 
-The profile can evolve over time. The app includes an "Evolve Profile" flow that uses recent reports to refresh the training-history and current-phase sections while preserving the protected coaching structure.
+The profile can evolve over time through two mechanisms:
+
+- **Weekly profile patch** (automatic): on every block close, after the report is generated and before the plan, a lightweight patch updates three structured sections — the rolling recent-weeks table, milestone statuses, and the last-updated date. This keeps Claude's rolling context fresh without a full rewrite.
+- **Evolve Profile** (manual): an admin-triggered full narrative rewrite that uses recent reports to refresh training history, current phase, and long-term context while preserving the protected coaching structure.
 
 ```mermaid
 flowchart LR
     P[Athlete Profile] --> E[Execute Training Block]
     E --> N[Workouts, Notes, Body Metrics]
     N --> R[Training Report with Claude]
+    R --> PA[Patch Profile]
+    PA --> P
+    PA --> W[Next Training Plan with Claude]
     R --> U[Evolve Profile / Update Context]
     U --> P
-    R --> W[Next Training Plan with Claude]
     W --> E
 ```
 
@@ -58,7 +63,8 @@ flowchart LR
 ### 4. Close blocks and generate outputs
 
 - Close the completed block from the admin UI
-- Let the app generate the finished-block report and the next 7-day plan together
+- The app generates the finished-block report, patches the profile with the week's rolling data, and then generates the next 7-day plan — all in one step
+- The profile patch updates the recent-weeks table, milestone statuses, and last-updated date so the plan benefits from the freshest context
 - Use the optional clarification prompt to explain travel, fatigue, schedule drift, or constraints for the next block
 - Review rendered HTML in the browser
 - Optionally send the summary and link to Telegram
@@ -101,7 +107,9 @@ flowchart LR
 ### Reporting
 
 - Closed-block report generation
-- Next-plan generation from the freshly closed block
+- Automatic profile patch after report generation: appends a row to the recent-weeks table, updates milestone statuses, and sets the last-updated date
+- Next-plan generation from the freshly closed block, using the just-patched profile for the freshest context
+- Profile patch failure is non-fatal — the plan is generated regardless
 - Standalone report/plan generation capability still exists in the backend, but the admin UI now centers the combined close-block workflow
 - Claude analysis of completed periods using workouts, metrics, notes, and athlete profile context
 - HTML rendering stored in `reports.full_html`
@@ -124,7 +132,9 @@ flowchart LR
 - Stored outside the database as a runtime file at `ATHLETE_PROFILE_PATH`
 - Bootstrapped from `config/athlete-profile.default.md` on first startup
 - Can be updated manually or evolved from recent reports through the admin UI
-- Contains protected sections required by the profile-evolution flow
+- Contains 8 protected sections required by the profile-evolution and profile-patch validators
+- Automatically patched on every block close (recent-weeks table, milestone statuses, last-updated date)
+- Profile is backed up before every patch or evolution write
 
 ### Telegram
 

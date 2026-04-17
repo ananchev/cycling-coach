@@ -199,6 +199,11 @@ func TestOrchestrator_GenerateCloseBlock_Success(t *testing.T) {
 		t.Errorf("plan user prompt = %q, want Travel Tuesday", provider.inputs[1].UserPrompt)
 	}
 
+	// Profile patch is skipped when provider is not *ClaudeProvider.
+	if got.ProfilePatched {
+		t.Error("ProfilePatched should be false with a non-Claude provider")
+	}
+
 	rep, err := storage.GetReport(db, storage.ReportTypeWeeklyReport, time.Date(2026, 3, 9, 0, 0, 0, 0, time.UTC))
 	if err != nil {
 		t.Fatalf("GetReport(closed block report): %v", err)

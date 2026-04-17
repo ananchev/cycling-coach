@@ -38,7 +38,7 @@ internal/wahoo/      OAuth, API client, sync, webhook models/handler
 internal/telegram/   bot and outbound sender
 internal/fit/        FIT parsing
 internal/analysis/   metric computation and FIT processing pipeline
-internal/reporting/  prompt assembly, Claude calls, rendering, delivery, profile evolution, progress interpretation
+internal/reporting/  prompt assembly, Claude calls, rendering, delivery, profile evolution, profile patching, progress interpretation
 internal/scheduler/  cron wiring
 internal/storage/    SQLite migrations and CRUD helpers
 internal/wyze/       Wyze sidecar client and importer
@@ -126,6 +126,11 @@ Current implementation details:
 - Telegram `/profile` returns the current file
 - Telegram `/profile set` replaces the file after downloading the attached markdown
 - `/api/profile/evolve` uses recent reports to rewrite the markdown via Claude
+- on every block close, a lightweight patch updates three structured sections (recent-weeks table, milestone statuses, last-updated date) without a full rewrite
+- both the patcher and evolver validate that all 8 protected section headings survive every write
+- patch failure is non-fatal — logged as a warning, plan generation continues
+- the patch step only runs when the provider is a `*ClaudeProvider` (skipped with stub providers in tests)
+- the profile is backed up with a timestamp suffix before every patch or evolution write
 
 Important limitation: the code does not currently parse the markdown back into `athlete_config`. Numeric training values used by analysis come from `athlete_config`, which is seeded in `cmd/server/main.go`.
 
@@ -260,6 +265,7 @@ Relevant current coverage exists for:
 - analysis metrics and processor behavior
 - storage CRUD and migrations
 - Claude provider and report assembly/orchestration
+- profile patching (section finding, patch application, week metrics computation)
 - Telegram sender and RPE parsing
 - SSE log stream
 

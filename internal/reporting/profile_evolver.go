@@ -134,6 +134,8 @@ var requiredProfileSections = []string{
 	"Your role as coach",
 	"Weekly structure template",
 	"Warning flags",
+	"Recent training weeks",
+	"Stelvio readiness milestones",
 }
 
 // validateEvolvedProfile returns an error if the evolved profile is suspiciously
@@ -165,6 +167,8 @@ Rules:
   - "Your role as coach"
   - "Weekly structure template"
   - "Warning flags"
+  - "Recent training weeks"
+  - "Stelvio readiness milestones"
 - Update numeric values (FTP, HR zones, power zones, weight) ONLY when there is clear evidence of sustained change across multiple reports
 - Update "Training history and current phase" to reflect recent progression from the reports
 - Update "Last Updated" to today's date
