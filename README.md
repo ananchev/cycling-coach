@@ -165,7 +165,7 @@ flowchart LR
 - Workout admin actions for note state, summary-row preview, per-ride zone preview, and FIT time-series download
 - Body-metrics charts with date-range filtering
 - Body-metrics charts suppress manual rows that duplicate same-day Wyze records
-- Reports & Plans table grouped by period: each row pairs the plan and the report for the same `[week_start, week_end]` window side-by-side, so a plan and the later report analyzing that same period appear together (with `—` shown when one side hasn't been generated yet)
+- Reports & Plans table grouped by period: each row pairs the plan and the report sharing the same `week_start` side-by-side, so a plan and the later report analyzing that same block appear together — even when execution extended past the planned 7-day window and the two ends differ (with `—` shown when one side hasn't been generated yet)
 
 ## Current Routes
 

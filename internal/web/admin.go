@@ -1434,22 +1434,19 @@ type reportPeriodRow struct {
 	Report *storage.ReportWithDelivery
 }
 
-// groupReportsByPeriod buckets reports by (week_start, week_end) into one row
-// per period, splitting plan and report into separate fields. Rows are sorted
-// by Start descending (most recent period first).
+// groupReportsByPeriod buckets reports by week_start into one row per period,
+// splitting plan and report into separate fields. The plan and the matching
+// report share the same week_start by construction (the report covers the block
+// the plan prescribed), but their week_end may differ when execution extended
+// past the planned window — in that case the row's End is taken from the report
+// since the report reflects the actual block. Rows are sorted by Start
+// descending (most recent period first).
 func groupReportsByPeriod(reports []storage.ReportWithDelivery) []reportPeriodRow {
-	type key struct {
-		start string
-		end   string
-	}
-	index := map[key]*reportPeriodRow{}
+	index := map[string]*reportPeriodRow{}
 	rows := []*reportPeriodRow{}
 	for i := range reports {
 		r := reports[i]
-		k := key{
-			start: r.WeekStart.Format("2006-01-02"),
-			end:   r.WeekEnd.Format("2006-01-02"),
-		}
+		k := r.WeekStart.Format("2006-01-02")
 		row, ok := index[k]
 		if !ok {
 			row = &reportPeriodRow{Start: r.WeekStart, End: r.WeekEnd}
@@ -1462,6 +1459,9 @@ func groupReportsByPeriod(reports []storage.ReportWithDelivery) []reportPeriodRo
 			row.Plan = &entry
 		case storage.ReportTypeWeeklyReport:
 			row.Report = &entry
+			// Report's window reflects the actual block; prefer it over the plan's
+			// prescription window when both are present.
+			row.End = r.WeekEnd
 		}
 	}
 	sort.Slice(rows, func(i, j int) bool {

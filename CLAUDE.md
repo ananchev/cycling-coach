@@ -229,7 +229,7 @@ These are admin display helpers only; they do not change the Claude prompt forma
 - notes can be created from the admin UI as well as edited/deleted there
 - workouts expose a FIT time-series CSV download when a FIT file exists
 - a placeholder manual workout may appear for a day with no recorded workout; if a real workout arrives later for that day, the placeholder is reconciled away and its notes are moved
-- the Reports & Plans table groups artifacts by period: each row pairs the plan and the report covering the same `[week_start, week_end]` window side-by-side, with `—` shown when one side hasn't been generated yet; saved system/user prompts are exposed through icons in each cell
+- the Reports & Plans table groups artifacts by period: each row pairs the plan and the report sharing the same `week_start` side-by-side (`week_end` may differ when execution extended past the planned 7-day window — the row's displayed end is taken from the report when present, since the report reflects the actual block), with `—` shown when one side hasn't been generated yet; saved system/user prompts are exposed through icons in each cell
 - the Progress page exposes KPI snapshots, selected-vs-prior comparison, and a single saved AI interpretation with saved prompts
 - the Claude per-ride workout detail currently includes:
   - average cadence in the summary row

@@ -237,7 +237,7 @@ progress_analyses table (single saved interpretation + prompts)
 - report/plan HTML served directly from the database
 - body metrics support date filtering in the UI and backend
 - workout rows expose note-state icons plus summary/zone/timeseries actions
-- the Reports & Plans table is grouped by period: each row pairs the plan and the report for the same `[week_start, week_end]` window side-by-side, with `—` shown when one side hasn't been generated yet
+- the Reports & Plans table is grouped by period: each row pairs the plan and the report sharing the same `week_start` side-by-side (`week_end` may differ when execution extended past the planned 7-day window — the row uses the report's end when present), with `—` shown when one side hasn't been generated yet
 
 ### Placeholder workout behavior
 
