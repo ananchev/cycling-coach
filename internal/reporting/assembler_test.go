@@ -236,6 +236,57 @@ func TestBuildPrompt_WeeklyPlan(t *testing.T) {
 	}
 }
 
+func TestBuildPrompt_PlanIncludesPrecedingReports(t *testing.T) {
+	weekStart := time.Date(2026, 4, 27, 0, 0, 0, 0, time.UTC)
+	input := &reporting.ReportInput{
+		Type:      storage.ReportTypeWeeklyPlan,
+		WeekStart: weekStart,
+		WeekEnd:   weekStart.AddDate(0, 0, 6),
+		PrecedingReports: []reporting.PrecedingReport{
+			{
+				WeekStart: time.Date(2026, 4, 12, 0, 0, 0, 0, time.UTC),
+				WeekEnd:   time.Date(2026, 4, 18, 0, 0, 0, 0, time.UTC),
+				Narrative: "## Older period\n\nTempo stable at 155W.",
+			},
+			{
+				WeekStart: time.Date(2026, 4, 19, 0, 0, 0, 0, time.UTC),
+				WeekEnd:   time.Date(2026, 4, 26, 0, 0, 0, 0, time.UTC),
+				Narrative: "## Just-ended period\n\nBreakthrough: 2x20min at 170W. Recommend 3x15min at 170W next.",
+			},
+		},
+	}
+
+	prompt := reporting.BuildPrompt(input)
+	for _, want := range []string{
+		"## Coach's analysis of the periods leading up to this plan",
+		"### Period 1: 2026-04-12 – 2026-04-18",
+		"### Period 2: 2026-04-19 – 2026-04-26 (just ended)",
+		"Tempo stable at 155W.",
+		"Breakthrough: 2x20min at 170W.",
+		"load-bearing",
+	} {
+		if !strings.Contains(prompt, want) {
+			t.Errorf("plan prompt missing %q", want)
+		}
+	}
+}
+
+func TestBuildPrompt_ReportIgnoresPrecedingReports(t *testing.T) {
+	weekStart := time.Date(2026, 4, 19, 0, 0, 0, 0, time.UTC)
+	input := &reporting.ReportInput{
+		Type:      storage.ReportTypeWeeklyReport,
+		WeekStart: weekStart,
+		WeekEnd:   weekStart.AddDate(0, 0, 6),
+		PrecedingReports: []reporting.PrecedingReport{
+			{Narrative: "## Should not appear in a report prompt"},
+		},
+	}
+	prompt := reporting.BuildPrompt(input)
+	if strings.Contains(prompt, "Coach's analysis of the periods leading up to this plan") {
+		t.Errorf("preceding-reports section should only render for plan prompts; got:\n%s", prompt)
+	}
+}
+
 func TestBuildPrompt_ReportExtendedBeyondPlannedWeek(t *testing.T) {
 	weekStart := time.Date(2026, 3, 9, 0, 0, 0, 0, time.UTC)
 	weekEnd := time.Date(2026, 3, 18, 0, 0, 0, 0, time.UTC)

@@ -134,6 +134,14 @@ Current implementation details:
 
 Important limitation: the code does not currently parse the markdown back into `athlete_config`. Numeric training values used by analysis come from `athlete_config`, which is seeded in `cmd/server/main.go`.
 
+## Current Report / Plan Generation Flow
+
+- both `Orchestrator.GenerateCloseBlock` and the scheduled weekly cron path generate a weekly_report first, then the next weekly_plan
+- plan generation is fed continuity context: up to the 3 most recent weekly_report narratives are loaded via `Orchestrator.LoadPrecedingReports` and passed to `Generate` as `precedingReports`
+- preceding reports are rendered into the plan prompt (oldest first, with the just-finished period marked `(just ended)`) so Claude extends recent recommendations rather than restarting progression
+- the report-side `Generate` call always passes `nil` for `precedingReports`; only plan generation uses this context
+- a missing/empty list is non-fatal — generation proceeds without continuity context and the failure is logged as a warning
+
 ## Current Telegram Behavior
 
 Implemented inbound commands:
@@ -221,7 +229,7 @@ These are admin display helpers only; they do not change the Claude prompt forma
 - notes can be created from the admin UI as well as edited/deleted there
 - workouts expose a FIT time-series CSV download when a FIT file exists
 - a placeholder manual workout may appear for a day with no recorded workout; if a real workout arrives later for that day, the placeholder is reconciled away and its notes are moved
-- the Reports & Plans table combines both artifact types, orders them in natural workflow order, and exposes saved system/user prompts through icons
+- the Reports & Plans table groups artifacts by period: each row pairs the plan and the report covering the same `[week_start, week_end]` window side-by-side, with `—` shown when one side hasn't been generated yet; saved system/user prompts are exposed through icons in each cell
 - the Progress page exposes KPI snapshots, selected-vs-prior comparison, and a single saved AI interpretation with saved prompts
 - the Claude per-ride workout detail currently includes:
   - average cadence in the summary row

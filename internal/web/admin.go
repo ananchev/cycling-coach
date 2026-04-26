@@ -6,6 +6,7 @@ import (
 	"html/template"
 	"log/slog"
 	"net/http"
+	"sort"
 	"time"
 
 	"cycling-coach/internal/storage"
@@ -34,29 +35,6 @@ var adminTmpl = template.Must(template.New("admin").Funcs(template.FuncMap{
 		}
 		m := *sec / 60
 		return fmt.Sprintf("%d:%02d", m/60, m%60)
-	},
-	"deliveryBadge": func(status *string) template.HTML {
-		if status == nil {
-			return `<span class="badge grey">—</span>`
-		}
-		switch *status {
-		case "sent":
-			return `<span class="badge green">sent ✓</span>`
-		case "failed":
-			return `<span class="badge red">failed ✗</span>`
-		default:
-			return `<span class="badge yellow">pending</span>`
-		}
-	},
-	"reportTypeLabel": func(t storage.ReportType) string {
-		switch t {
-		case storage.ReportTypeWeeklyReport:
-			return "Report"
-		case storage.ReportTypeWeeklyPlan:
-			return "Plan"
-		default:
-			return string(t)
-		}
 	},
 }).Parse(`<!DOCTYPE html>
 <html lang="en">
@@ -389,27 +367,18 @@ var adminTmpl = template.Must(template.New("admin").Funcs(template.FuncMap{
     <button type="submit">Filter</button>
     <a href="/admin?tab=reports"><button type="button" class="secondary">Reset</button></a>
   </form>
-  <p class="hint" style="margin-bottom:12px">This table intentionally combines weekly reports and weekly plans, because both are outputs of the same coaching workflow.</p>
-  {{if .Reports}}
+  <p class="hint" style="margin-bottom:12px">Each row pairs the plan and report for a single period — the plan prescribes, the report analyzes what actually happened.</p>
+  {{if .ReportPeriods}}
   <table>
     <thead><tr>
-      <th>#</th><th>Type</th><th>Period Start</th><th>Status</th><th>Actions</th>
+      <th>Period</th><th>Plan</th><th>Report</th>
     </tr></thead>
     <tbody>
-    {{range .Reports}}
-    <tr id="row-{{.ID}}">
-      <td>{{.ID}}</td>
-      <td>{{reportTypeLabel .Type}}</td>
-      <td>{{fmtDate .WeekStart}}</td>
-      <td>{{deliveryBadge .DeliveryStatus}}</td>
-      <td>
-        <span class="icon-btn {{if .HasSystemPrompt}}active{{else}}muted{{end}}" onclick="showReportPrompt({{.ID}}, 'system')" title="View system prompt">🧠</span>
-        <span class="icon-btn {{if .HasUserPrompt}}active{{else}}muted{{end}}" onclick="showReportPrompt({{.ID}}, 'user')" title="View user prompt">📨</span>
-        &nbsp;
-        <button class="act-btn secondary" onclick="sendReport({{.ID}})">Send</button>
-        {{if .FullHTML}}&nbsp;<a href="{{if eq (print .Type) "weekly_plan"}}/plans/{{else}}/reports/{{end}}{{.ID}}" target="_blank"><button class="act-btn secondary">View</button></a>{{end}}
-        &nbsp;<button class="act-btn danger" onclick="deleteReport({{.ID}})">Delete</button>
-      </td>
+    {{range .ReportPeriods}}
+    <tr>
+      <td style="white-space:nowrap">{{fmtDate .Start}} → {{fmtDate .End}}</td>
+      <td id="cell-{{if .Plan}}{{.Plan.ID}}{{else}}plan-{{fmtDate .Start}}{{end}}">{{template "artifactCell" .Plan}}</td>
+      <td id="cell-{{if .Report}}{{.Report.ID}}{{else}}report-{{fmtDate .Start}}{{end}}">{{template "artifactCell" .Report}}</td>
     </tr>
     {{end}}
     </tbody>
@@ -417,6 +386,13 @@ var adminTmpl = template.Must(template.New("admin").Funcs(template.FuncMap{
   {{else}}
   <p style="color:#888;font-size:.9rem">No reports found for this date range.</p>
   {{end}}
+{{define "artifactCell"}}{{if .}}<span style="font-weight:500">#{{.ID}}</span>
+        <span class="icon-btn {{if .HasSystemPrompt}}active{{else}}muted{{end}}" onclick="showReportPrompt({{.ID}}, 'system')" title="View system prompt">🧠</span>
+        <span class="icon-btn {{if .HasUserPrompt}}active{{else}}muted{{end}}" onclick="showReportPrompt({{.ID}}, 'user')" title="View user prompt">📨</span>
+        &nbsp;
+        <button class="act-btn secondary" onclick="sendReport({{.ID}})">Send</button>
+        {{if .FullHTML}}&nbsp;<a href="{{if eq (print .Type) "weekly_plan"}}/plans/{{else}}/reports/{{end}}{{.ID}}" target="_blank"><button class="act-btn secondary">View</button></a>{{end}}
+        &nbsp;<button class="act-btn danger" onclick="deleteReport({{.ID}})">Delete</button>{{else}}<span style="color:#bbb">—</span>{{end}}{{end}}
   <div class="result" id="send-result"></div>
 </div>
 </div><!-- /tab-reports -->
@@ -827,8 +803,8 @@ async function deleteReport(id) {
   try {
     const r = await fetch('/api/report/' + id, {method: 'DELETE'});
     if (!r.ok) { showResult('send-result', false, 'Delete failed for report #' + id); return; }
-    const row = document.getElementById('row-' + id);
-    if (row) row.remove();
+    const cell = document.getElementById('cell-' + id);
+    if (cell) cell.innerHTML = '<span style="color:#bbb">—</span>';
     showResult('send-result', true, 'Report #' + id + ' deleted.');
   } catch(e) { showResult('send-result', false, e.toString()); }
 }
@@ -1448,8 +1424,59 @@ initLogStream();
 </html>
 `))
 
+// reportPeriodRow groups a weekly_plan and the weekly_report covering the same
+// [WeekStart, WeekEnd] window, so the admin page can show plan vs. report
+// side-by-side for each period.
+type reportPeriodRow struct {
+	Start  time.Time
+	End    time.Time
+	Plan   *storage.ReportWithDelivery
+	Report *storage.ReportWithDelivery
+}
+
+// groupReportsByPeriod buckets reports by (week_start, week_end) into one row
+// per period, splitting plan and report into separate fields. Rows are sorted
+// by Start descending (most recent period first).
+func groupReportsByPeriod(reports []storage.ReportWithDelivery) []reportPeriodRow {
+	type key struct {
+		start string
+		end   string
+	}
+	index := map[key]*reportPeriodRow{}
+	rows := []*reportPeriodRow{}
+	for i := range reports {
+		r := reports[i]
+		k := key{
+			start: r.WeekStart.Format("2006-01-02"),
+			end:   r.WeekEnd.Format("2006-01-02"),
+		}
+		row, ok := index[k]
+		if !ok {
+			row = &reportPeriodRow{Start: r.WeekStart, End: r.WeekEnd}
+			index[k] = row
+			rows = append(rows, row)
+		}
+		entry := r
+		switch r.Type {
+		case storage.ReportTypeWeeklyPlan:
+			row.Plan = &entry
+		case storage.ReportTypeWeeklyReport:
+			row.Report = &entry
+		}
+	}
+	sort.Slice(rows, func(i, j int) bool {
+		return rows[i].Start.After(rows[j].Start)
+	})
+	out := make([]reportPeriodRow, len(rows))
+	for i, r := range rows {
+		out[i] = *r
+	}
+	return out
+}
+
 type adminPageData struct {
 	Reports                 []storage.ReportWithDelivery
+	ReportPeriods           []reportPeriodRow
 	Workouts                []storage.WorkoutWithMetrics
 	WyzeRecords             []storage.BodyMetricRecordDetail
 	FilterFrom              string
@@ -1566,6 +1593,7 @@ func adminHandler(db *sql.DB) http.HandlerFunc {
 
 		data := adminPageData{
 			Reports:                 reports,
+			ReportPeriods:           groupReportsByPeriod(reports),
 			Workouts:                workouts,
 			WyzeRecords:             wyzeRecords,
 			FilterFrom:              filterFrom,

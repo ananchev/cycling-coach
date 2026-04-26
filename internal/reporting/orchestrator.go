@@ -53,8 +53,12 @@ func (o *Orchestrator) EvolveProfile(ctx context.Context, lastN int) (*EvolvePro
 
 // Generate runs the full report pipeline for the given type and week window.
 // userPrompt is optional free-text from the athlete (constraints for the plan).
+// precedingReports is optional context — when non-empty (typically only on plan
+// generation from the close-block flow) it is attached to the prompt so Claude
+// can extend recent recommendations rather than restart progression. Pass nil
+// when no preceding context applies.
 // Returns the ID of the persisted report row.
-func (o *Orchestrator) Generate(ctx context.Context, reportType storage.ReportType, weekStart, weekEnd time.Time, userPrompt string) (int64, error) {
+func (o *Orchestrator) Generate(ctx context.Context, reportType storage.ReportType, weekStart, weekEnd time.Time, userPrompt string, precedingReports []PrecedingReport) (int64, error) {
 	slog.Info("reporting: generating", "type", string(reportType), "week_start", weekStart.Format("2006-01-02"))
 
 	input, err := AssembleInput(ctx, o.db, o.profilePath, reportType, weekStart, weekEnd)
@@ -62,6 +66,7 @@ func (o *Orchestrator) Generate(ctx context.Context, reportType storage.ReportTy
 		return 0, fmt.Errorf("reporting.Orchestrator.Generate: assemble: %w", err)
 	}
 	input.UserPrompt = userPrompt
+	input.PrecedingReports = precedingReports
 	systemPrompt := input.AthleteProfile
 	userPromptText := BuildPrompt(input)
 
@@ -127,7 +132,7 @@ func (o *Orchestrator) GenerateCloseBlock(ctx context.Context, blockEnd time.Tim
 		return nil, fmt.Errorf("reporting.Orchestrator.GenerateCloseBlock: assemble: %w", err)
 	}
 
-	reportID, err := o.Generate(ctx, storage.ReportTypeWeeklyReport, blockStart, blockEnd, "")
+	reportID, err := o.Generate(ctx, storage.ReportTypeWeeklyReport, blockStart, blockEnd, "", nil)
 	if err != nil {
 		return nil, fmt.Errorf("reporting.Orchestrator.GenerateCloseBlock: weekly report: %w", err)
 	}
@@ -160,7 +165,14 @@ func (o *Orchestrator) GenerateCloseBlock(ctx context.Context, blockEnd time.Tim
 
 	planStart := blockEnd.AddDate(0, 0, 1)
 	planEnd := planStart.AddDate(0, 0, 6)
-	planID, err := o.Generate(ctx, storage.ReportTypeWeeklyPlan, planStart, planEnd, userPrompt)
+
+	precedingReports, err := o.LoadPrecedingReports(3)
+	if err != nil {
+		// Non-fatal — proceed without continuity context.
+		slog.Warn("reporting: could not load preceding reports for plan continuity", "err", err)
+	}
+
+	planID, err := o.Generate(ctx, storage.ReportTypeWeeklyPlan, planStart, planEnd, userPrompt, precedingReports)
 	if err != nil {
 		return nil, fmt.Errorf("reporting.Orchestrator.GenerateCloseBlock: weekly plan: %w", err)
 	}
@@ -179,4 +191,27 @@ func (o *Orchestrator) GenerateCloseBlock(ctx context.Context, blockEnd time.Tim
 
 func dateOnly(t time.Time) time.Time {
 	return time.Date(t.Year(), t.Month(), t.Day(), 0, 0, 0, 0, t.Location())
+}
+
+// LoadPrecedingReports returns up to n most recent weekly_report narratives,
+// ordered chronologically (oldest first). Reports without a narrative are skipped.
+// Used to give plan generation continuity with recently generated reports.
+func (o *Orchestrator) LoadPrecedingReports(n int) ([]PrecedingReport, error) {
+	rows, err := storage.ListReports(o.db, storage.ReportTypeWeeklyReport, n)
+	if err != nil {
+		return nil, fmt.Errorf("reporting.Orchestrator.LoadPrecedingReports: %w", err)
+	}
+	out := make([]PrecedingReport, 0, len(rows))
+	for i := len(rows) - 1; i >= 0; i-- {
+		r := rows[i]
+		if r.NarrativeText == nil || *r.NarrativeText == "" {
+			continue
+		}
+		out = append(out, PrecedingReport{
+			WeekStart: r.WeekStart,
+			WeekEnd:   r.WeekEnd,
+			Narrative: *r.NarrativeText,
+		})
+	}
+	return out, nil
 }

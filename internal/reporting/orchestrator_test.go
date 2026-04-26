@@ -25,7 +25,7 @@ func TestOrchestrator_Generate_Success(t *testing.T) {
 	}
 
 	orch := reporting.NewOrchestrator(db, profile, stub)
-	id, err := orch.Generate(context.Background(), storage.ReportTypeWeeklyReport, weekStart, weekEnd, "")
+	id, err := orch.Generate(context.Background(), storage.ReportTypeWeeklyReport, weekStart, weekEnd, "", nil)
 	if err != nil {
 		t.Fatalf("Generate error: %v", err)
 	}
@@ -62,7 +62,7 @@ func TestOrchestrator_Generate_ProviderError(t *testing.T) {
 	stub := &reporting.StubProvider{Err: errors.New("API unavailable")}
 
 	orch := reporting.NewOrchestrator(db, profile, stub)
-	_, err := orch.Generate(context.Background(), storage.ReportTypeWeeklyReport, weekStart, weekEnd, "")
+	_, err := orch.Generate(context.Background(), storage.ReportTypeWeeklyReport, weekStart, weekEnd, "", nil)
 	if err == nil {
 		t.Fatal("expected error from provider, got nil")
 	}
@@ -78,12 +78,12 @@ func TestOrchestrator_Generate_Idempotent(t *testing.T) {
 	stub := &reporting.StubProvider{}
 	orch := reporting.NewOrchestrator(db, profile, stub)
 
-	id1, err := orch.Generate(context.Background(), storage.ReportTypeWeeklyReport, weekStart, weekEnd, "")
+	id1, err := orch.Generate(context.Background(), storage.ReportTypeWeeklyReport, weekStart, weekEnd, "", nil)
 	if err != nil {
 		t.Fatalf("first Generate: %v", err)
 	}
 
-	id2, err := orch.Generate(context.Background(), storage.ReportTypeWeeklyReport, weekStart, weekEnd, "")
+	id2, err := orch.Generate(context.Background(), storage.ReportTypeWeeklyReport, weekStart, weekEnd, "", nil)
 	if err != nil {
 		t.Fatalf("second Generate: %v", err)
 	}
@@ -103,7 +103,7 @@ func TestOrchestrator_Generate_MissingProfile(t *testing.T) {
 	stub := &reporting.StubProvider{}
 	orch := reporting.NewOrchestrator(db, "/nonexistent/athlete-profile.md", stub)
 
-	_, err := orch.Generate(context.Background(), storage.ReportTypeWeeklyReport, weekStart, weekEnd, "")
+	_, err := orch.Generate(context.Background(), storage.ReportTypeWeeklyReport, weekStart, weekEnd, "", nil)
 	if err == nil {
 		t.Fatal("expected error for missing profile, got nil")
 	}
@@ -124,7 +124,7 @@ func TestOrchestrator_Generate_HTMLContainsContent(t *testing.T) {
 	}
 
 	orch := reporting.NewOrchestrator(db, profile, stub)
-	id, err := orch.Generate(context.Background(), storage.ReportTypeWeeklyReport, weekStart, weekEnd, "")
+	id, err := orch.Generate(context.Background(), storage.ReportTypeWeeklyReport, weekStart, weekEnd, "", nil)
 	if err != nil {
 		t.Fatalf("Generate: %v", err)
 	}
@@ -197,6 +197,21 @@ func TestOrchestrator_GenerateCloseBlock_Success(t *testing.T) {
 	}
 	if provider.inputs[1].UserPrompt != "Travel Tuesday" {
 		t.Errorf("plan user prompt = %q, want Travel Tuesday", provider.inputs[1].UserPrompt)
+	}
+	// First call (the report) must NOT receive preceding-report context — that is plan-only.
+	if len(provider.inputs[0].PrecedingReports) != 0 {
+		t.Errorf("report call should have no PrecedingReports; got %d", len(provider.inputs[0].PrecedingReports))
+	}
+	// Second call (the plan) should receive the just-generated report's narrative as continuity context.
+	if len(provider.inputs[1].PrecedingReports) == 0 {
+		t.Fatal("plan call should receive PrecedingReports from the just-closed block")
+	}
+	last := provider.inputs[1].PrecedingReports[len(provider.inputs[1].PrecedingReports)-1]
+	if last.Narrative != "# Closed block report" {
+		t.Errorf("plan PrecedingReports last narrative = %q, want closed-block narrative", last.Narrative)
+	}
+	if last.WeekStart.Format("2006-01-02") != "2026-03-09" {
+		t.Errorf("plan PrecedingReports last WeekStart = %s, want 2026-03-09", last.WeekStart.Format("2006-01-02"))
 	}
 
 	// Profile patch is skipped when provider is not *ClaudeProvider.

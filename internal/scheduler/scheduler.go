@@ -183,7 +183,7 @@ func (s *Scheduler) runWeeklyReport() {
 	weekEnd := weekStart.AddDate(0, 0, 7)
 
 	// Generate weekly report.
-	reportID, err := s.orch.Generate(context.Background(), storage.ReportTypeWeeklyReport, weekStart, weekEnd, "")
+	reportID, err := s.orch.Generate(context.Background(), storage.ReportTypeWeeklyReport, weekStart, weekEnd, "", nil)
 	if err != nil {
 		slog.Error("scheduler: report generation failed",
 			"week_start", weekStart.Format("2006-01-02"),
@@ -196,7 +196,14 @@ func (s *Scheduler) runWeeklyReport() {
 	// Generate weekly plan for the upcoming week.
 	planStart := weekEnd
 	planEnd := planStart.AddDate(0, 0, 7)
-	planID, err := s.orch.Generate(context.Background(), storage.ReportTypeWeeklyPlan, planStart, planEnd, "")
+
+	precedingReports, err := s.orch.LoadPrecedingReports(3)
+	if err != nil {
+		// Non-fatal — proceed without continuity context.
+		slog.Warn("scheduler: could not load preceding reports for plan continuity", "err", err)
+	}
+
+	planID, err := s.orch.Generate(context.Background(), storage.ReportTypeWeeklyPlan, planStart, planEnd, "", precedingReports)
 	if err != nil {
 		slog.Error("scheduler: plan generation failed",
 			"plan_start", planStart.Format("2006-01-02"),

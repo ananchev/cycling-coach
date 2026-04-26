@@ -25,10 +25,23 @@ type ReportInput struct {
 	// Populated when generating a weekly_report so Claude can compare plan vs. reality.
 	// Empty when generating a weekly_plan (no prior context needed).
 	PriorPlanNarrative string
+	// PrecedingReports holds the most recent weekly_report narratives (oldest first)
+	// from the periods leading up to a plan window. Populated when generating a
+	// weekly_plan so Claude can extend the just-finished period's recommendations
+	// rather than restart progression. The last entry is the period that just ended.
+	PrecedingReports []PrecedingReport
 	// UserPrompt is optional free-text from the athlete providing constraints or
 	// clarifications for the upcoming plan (e.g. "travelling Tuesday, only 30 min Wed").
 	// Used when generating a weekly_plan.
 	UserPrompt string
+}
+
+// PrecedingReport is a digest of a previously generated weekly_report carried
+// forward into plan generation for continuity.
+type PrecedingReport struct {
+	WeekStart time.Time
+	WeekEnd   time.Time
+	Narrative string
 }
 
 // RideSummary is a per-ride digest assembled for the report prompt.

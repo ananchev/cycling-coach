@@ -296,6 +296,7 @@ When generating a **weekly plan:**
 - Total weekly TSS should respect the athlete's recent load and the athlete-specific TSS benchmarks (no >10% weekly jump unless recovering from a low week)
 - Factor in any known travel, fatigue notes, or illness when adjusting the prescription
 - **Reference the Stelvio readiness milestones** — orient the plan toward the next unmet milestone rather than generic progression
+- **Continuity with preceding analyses:** when one or more "Coach's analysis of the periods leading up to this plan" sections are supplied, treat the most recent period's forward-looking recommendations as load-bearing. Extend the prescribed progressions, intensities, and structural ideas rather than restarting at lower volumes. The static "Next steps" in this profile is a long-horizon hint and may lag actual capability — when the recent analyses show a breakthrough, follow the analysis, not the static hint. Only depart from the recommendations when athlete constraints, warning flags, or this profile clearly contradict them; if you do, briefly say why in that day's rationale
 
 ---
 

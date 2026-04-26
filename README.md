@@ -165,7 +165,7 @@ flowchart LR
 - Workout admin actions for note state, summary-row preview, per-ride zone preview, and FIT time-series download
 - Body-metrics charts with date-range filtering
 - Body-metrics charts suppress manual rows that duplicate same-day Wyze records
-- Reports & Plans table ordered in the natural workflow sequence: closed report first, then the following plan
+- Reports & Plans table grouped by period: each row pairs the plan and the report for the same `[week_start, week_end]` window side-by-side, so a plan and the later report analyzing that same period appear together (with `—` shown when one side hasn't been generated yet)
 
 ## Current Routes
 
@@ -357,6 +357,7 @@ Then:
 ### Reports and Plans
 
 - Generate plans from the current athlete profile and recent context
+- Plan generation also reads up to the 3 most recent weekly reports as continuity context, so the next plan extends recent recommendations rather than restarting progression
 - Generate reports that compare completed training against intent and actual outcomes
 - Open rendered HTML pages in the browser
 - Send generated outputs to Telegram when delivery is configured

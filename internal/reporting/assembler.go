@@ -277,6 +277,26 @@ func BuildPrompt(input *ReportInput) string {
 		b.WriteString("\n")
 	}
 
+	if !isReport && len(input.PrecedingReports) > 0 {
+		b.WriteString("## Coach's analysis of the periods leading up to this plan\n\n")
+		b.WriteString("These are the weekly reports you have just produced for the most recent training periods, oldest first. The last entry is the period that just ended.\n\n")
+		for i, pr := range input.PrecedingReports {
+			label := fmt.Sprintf("### Period %d: %s – %s",
+				i+1,
+				pr.WeekStart.Format("2006-01-02"),
+				pr.WeekEnd.Format("2006-01-02"),
+			)
+			if i == len(input.PrecedingReports)-1 {
+				label += " (just ended)"
+			}
+			b.WriteString(label)
+			b.WriteString("\n\n")
+			b.WriteString(strings.TrimSpace(pr.Narrative))
+			b.WriteString("\n\n")
+		}
+		b.WriteString("Build this plan as the direct continuation of those analyses. Treat the most recent period's forward-looking recommendations as load-bearing — adopt the prescribed progressions, intensities, and structural ideas (e.g. outdoor sessions, climbing simulations) rather than restarting at lower volumes. Only depart from those recommendations when the athlete profile, athlete constraints, or warning flags below clearly contradict them; if you do depart, briefly say why in the rationale for that day.\n\n")
+	}
+
 	if !isReport && input.UserPrompt != "" {
 		b.WriteString("## Athlete constraints / notes for this period\n\n")
 		b.WriteString(input.UserPrompt)

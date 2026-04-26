@@ -195,6 +195,8 @@ progress_analyses table (single saved interpretation + prompts)
 - patch failure is non-fatal — logged as a warning, plan generation continues regardless
 - the patch step only runs when the provider is a `*ClaudeProvider` (skipped in tests with stub providers)
 - reports optionally include the prior plan narrative for plan-vs-actual comparison
+- plan generation receives continuity context: up to the 3 most recent weekly_report narratives are attached to the prompt (oldest first, with the just-ended period marked) so Claude extends recent recommendations rather than restarting progression at lower volumes
+- both the close-block flow and the scheduled weekly cron path apply this continuity context to plan generation; report generation never receives it
 - when execution extends beyond the originally planned 7-day block, the prompt explicitly tells Claude to interpret that drift
 - the Claude prompt now includes a structured body-metrics block for the selected period, including weight, body fat, muscle mass, body water, and BMR when available
 - output is expected from Claude as JSON with:
@@ -235,6 +237,7 @@ progress_analyses table (single saved interpretation + prompts)
 - report/plan HTML served directly from the database
 - body metrics support date filtering in the UI and backend
 - workout rows expose note-state icons plus summary/zone/timeseries actions
+- the Reports & Plans table is grouped by period: each row pairs the plan and the report for the same `[week_start, week_end]` window side-by-side, with `—` shown when one side hasn't been generated yet
 
 ### Placeholder workout behavior
 

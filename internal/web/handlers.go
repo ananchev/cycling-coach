@@ -195,7 +195,7 @@ func reportHandler(orch *reporting.Orchestrator) http.HandlerFunc {
 			weekEnd = weekStart.Add(7 * 24 * time.Hour)
 		}
 
-		id, err := orch.Generate(r.Context(), reportType, weekStart, weekEnd, req.UserPrompt)
+		id, err := orch.Generate(r.Context(), reportType, weekStart, weekEnd, req.UserPrompt, nil)
 		if err != nil {
 			slog.Error("report generation failed", "err", err)
 			http.Error(w, "report generation failed: "+err.Error(), http.StatusInternalServerError)
