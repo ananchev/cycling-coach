@@ -141,6 +141,9 @@ Important limitation: the code does not currently parse the markdown back into `
 - preceding reports are rendered into the plan prompt (oldest first, with the just-finished period marked `(just ended)`) so Claude extends recent recommendations rather than restarting progression
 - the report-side `Generate` call always passes `nil` for `precedingReports`; only plan generation uses this context
 - a missing/empty list is non-fatal — generation proceeds without continuity context and the failure is logged as a warning
+- the HTTP close-block endpoint runs asynchronously: `POST /api/report/close-block` validates inputs synchronously via `Orchestrator.ResolveCloseBlockWindow`, then dispatches the report+patch+plan chain to a background goroutine and returns `202 Accepted` immediately so reverse-proxy timeouts (e.g. Cloudflare's ~100s ceiling) cannot abort the work mid-chain
+- the background goroutine uses a detached `context.Background()` with a 15-minute timeout so client disconnect does not cancel the in-flight Anthropic call
+- a single-flight guard returns `409 Conflict` when a close-block run is already in progress; progress and final result are logged via slog and visible in the live Logs tab
 
 ## Current Telegram Behavior
 

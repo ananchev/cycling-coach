@@ -102,28 +102,39 @@ func (o *Orchestrator) Generate(ctx context.Context, reportType storage.ReportTy
 	return id, nil
 }
 
-// GenerateCloseBlock closes the current training block and immediately creates the next 7-day plan.
-// The closed block starts on the day after the latest weekly report's end date.
-// On first use, when no prior weekly report exists, initialBlockStart must be provided.
-func (o *Orchestrator) GenerateCloseBlock(ctx context.Context, blockEnd time.Time, initialBlockStart *time.Time, userPrompt string) (*CloseBlockResult, error) {
+// ResolveCloseBlockWindow infers the block window for a close-block run and
+// validates the inputs without doing any expensive work. The HTTP layer calls
+// this synchronously to surface input errors before kicking off the (long-running)
+// async generation; GenerateCloseBlock calls it internally too.
+func (o *Orchestrator) ResolveCloseBlockWindow(blockEnd time.Time, initialBlockStart *time.Time) (time.Time, time.Time, error) {
 	lastClosed, err := storage.GetLatestReport(o.db, storage.ReportTypeWeeklyReport)
 	var blockStart time.Time
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			if initialBlockStart == nil || initialBlockStart.IsZero() {
-				return nil, fmt.Errorf("reporting.Orchestrator.GenerateCloseBlock: no prior weekly report exists; provide an initial block start for the first close-block run")
+				return time.Time{}, time.Time{}, fmt.Errorf("reporting.Orchestrator.ResolveCloseBlockWindow: no prior weekly report exists; provide an initial block start for the first close-block run")
 			}
 			blockStart = dateOnly(*initialBlockStart)
 		} else {
-			return nil, fmt.Errorf("reporting.Orchestrator.GenerateCloseBlock: latest weekly report: %w", err)
+			return time.Time{}, time.Time{}, fmt.Errorf("reporting.Orchestrator.ResolveCloseBlockWindow: latest weekly report: %w", err)
 		}
 	} else {
 		blockStart = dateOnly(lastClosed.WeekEnd).AddDate(0, 0, 1)
 	}
-
 	blockEnd = dateOnly(blockEnd)
 	if blockEnd.Before(blockStart) {
-		return nil, fmt.Errorf("reporting.Orchestrator.GenerateCloseBlock: block end %s is before inferred block start %s", blockEnd.Format("2006-01-02"), blockStart.Format("2006-01-02"))
+		return time.Time{}, time.Time{}, fmt.Errorf("reporting.Orchestrator.ResolveCloseBlockWindow: block end %s is before inferred block start %s", blockEnd.Format("2006-01-02"), blockStart.Format("2006-01-02"))
+	}
+	return blockStart, blockEnd, nil
+}
+
+// GenerateCloseBlock closes the current training block and immediately creates the next 7-day plan.
+// The closed block starts on the day after the latest weekly report's end date.
+// On first use, when no prior weekly report exists, initialBlockStart must be provided.
+func (o *Orchestrator) GenerateCloseBlock(ctx context.Context, blockEnd time.Time, initialBlockStart *time.Time, userPrompt string) (*CloseBlockResult, error) {
+	blockStart, blockEnd, err := o.ResolveCloseBlockWindow(blockEnd, initialBlockStart)
+	if err != nil {
+		return nil, err
 	}
 
 	// Assemble input first — we need the rides/metrics for both the report and the patch.

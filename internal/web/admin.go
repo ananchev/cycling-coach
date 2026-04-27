@@ -756,7 +756,7 @@ async function runCloseBlock() {
   const initialBlockStart = startField.disabled ? '' : startField.value;
   if (!blockEnd) { showResult('close-block-result', false, 'Please choose a block end date.'); return; }
   setLoading('close-block-btn', 'close-block-spin', true);
-  showResult('close-block-result', true, 'Generating the closing report and the next plan. This may take a little while...');
+  showResult('close-block-result', true, 'Validating and starting close-block...');
   try {
     const body = {block_end: blockEnd};
     if (initialBlockStart) body.initial_block_start = initialBlockStart;
@@ -775,9 +775,10 @@ async function runCloseBlock() {
       return;
     }
     showResult('close-block-result', true,
-      'Closed block ' + j.block_start + ' to ' + j.block_end +
-      ' and created the next plan for ' + j.plan_start + ' to ' + j.plan_end +
-      '. Reload page to see both entries.');
+      'Close-block started in the background for ' + j.block_start + ' → ' + j.block_end + '. ' +
+      'Generating the report, patching the profile, and creating the next plan typically takes 3–6 minutes total. ' +
+      'Refresh this page in ~5 minutes to see both rows in the Reports & Plans table. ' +
+      'Live progress is in the Logs tab.');
   } catch(e) {
     showResult('close-block-result', false, e.toString());
   } finally {

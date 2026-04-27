@@ -1,6 +1,7 @@
 package web
 
 import (
+	"context"
 	"database/sql"
 	"encoding/csv"
 	"encoding/json"
@@ -10,6 +11,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -21,6 +23,64 @@ import (
 	"cycling-coach/internal/wahoo"
 	wyzepkg "cycling-coach/internal/wyze"
 )
+
+// closeBlockRunner serializes close-block generation runs and lets the HTTP
+// handler return a 202 immediately while the (multi-minute) Claude calls run
+// in the background. The detached context is critical: when the request
+// context is canceled (e.g. Cloudflare 504 after ~100s), the in-flight
+// Anthropic call would be canceled too, leaving the run half-finished.
+type closeBlockRunner struct {
+	orch *reporting.Orchestrator
+	mu   sync.Mutex
+	busy bool
+	wg   sync.WaitGroup // exposed via Wait for tests; production never calls Wait
+}
+
+func newCloseBlockRunner(orch *reporting.Orchestrator) *closeBlockRunner {
+	return &closeBlockRunner{orch: orch}
+}
+
+// Start kicks off a close-block run in the background. Returns false when a
+// run is already in progress so the handler can return 409 Conflict.
+func (c *closeBlockRunner) Start(blockEnd time.Time, initialBlockStart *time.Time, userPrompt string) bool {
+	c.mu.Lock()
+	if c.busy {
+		c.mu.Unlock()
+		return false
+	}
+	c.busy = true
+	c.mu.Unlock()
+	c.wg.Add(1)
+	go func() {
+		defer c.wg.Done()
+		defer func() {
+			c.mu.Lock()
+			c.busy = false
+			c.mu.Unlock()
+		}()
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Minute)
+		defer cancel()
+		slog.Info("close-block: background run starting", "block_end", blockEnd.Format("2006-01-02"))
+		result, err := c.orch.GenerateCloseBlock(ctx, blockEnd, initialBlockStart, userPrompt)
+		if err != nil {
+			slog.Error("close-block: background run failed", "err", err)
+			return
+		}
+		slog.Info("close-block: background run complete",
+			"report_id", result.ReportID,
+			"plan_id", result.PlanID,
+			"block_start", result.BlockStart.Format("2006-01-02"),
+			"block_end", result.BlockEnd.Format("2006-01-02"),
+			"plan_start", result.PlanStart.Format("2006-01-02"),
+			"plan_end", result.PlanEnd.Format("2006-01-02"),
+			"profile_patched", result.ProfilePatched,
+		)
+	}()
+	return true
+}
+
+// Wait blocks until any in-flight close-block run finishes. Used in tests.
+func (c *closeBlockRunner) Wait() { c.wg.Wait() }
 
 func healthHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
@@ -207,9 +267,12 @@ func reportHandler(orch *reporting.Orchestrator) http.HandlerFunc {
 	}
 }
 
-// closeBlockReportHandler closes the current block and immediately creates the next weekly plan.
+// closeBlockReportHandler validates inputs synchronously, then kicks off the
+// (multi-minute) report+plan generation in the background and returns 202.
+// This avoids 5xx timeouts at the proxy layer when the full chain of Claude
+// calls exceeds typical request budgets.
 // Request body: {"block_end":"2026-03-29","user_prompt":"optional clarification for the next plan"}
-func closeBlockReportHandler(orch *reporting.Orchestrator) http.HandlerFunc {
+func closeBlockReportHandler(runner *closeBlockRunner) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var req struct {
 			BlockEnd          string `json:"block_end"`
@@ -241,25 +304,28 @@ func closeBlockReportHandler(orch *reporting.Orchestrator) http.HandlerFunc {
 			initialBlockStart = &t
 		}
 
-		result, err := orch.GenerateCloseBlock(r.Context(), blockEnd, initialBlockStart, req.UserPrompt)
+		blockStart, resolvedEnd, err := runner.orch.ResolveCloseBlockWindow(blockEnd, initialBlockStart)
 		if err != nil {
-			slog.Error("close block generation failed", "err", err)
 			status := http.StatusInternalServerError
 			if strings.Contains(err.Error(), "no prior weekly report exists") || strings.Contains(err.Error(), "is before inferred block start") {
 				status = http.StatusBadRequest
 			}
-			http.Error(w, "close block generation failed: "+err.Error(), status)
+			http.Error(w, err.Error(), status)
+			return
+		}
+
+		if !runner.Start(blockEnd, initialBlockStart, req.UserPrompt) {
+			http.Error(w, "a close-block run is already in progress; wait for it to finish (watch the Logs tab) before starting another", http.StatusConflict)
 			return
 		}
 
 		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusAccepted)
 		json.NewEncoder(w).Encode(map[string]any{ //nolint:errcheck
-			"report_id":   result.ReportID,
-			"plan_id":     result.PlanID,
-			"block_start": result.BlockStart.Format("2006-01-02"),
-			"block_end":   result.BlockEnd.Format("2006-01-02"),
-			"plan_start":  result.PlanStart.Format("2006-01-02"),
-			"plan_end":    result.PlanEnd.Format("2006-01-02"),
+			"status":      "started",
+			"block_start": blockStart.Format("2006-01-02"),
+			"block_end":   resolvedEnd.Format("2006-01-02"),
+			"message":     "Close-block started in the background. Generating the report, patching the profile, and creating the next plan typically takes 3–6 minutes total. Refresh this page in ~5 minutes to see both rows in the Reports & Plans table. Live progress is in the Logs tab.",
 		})
 	}
 }

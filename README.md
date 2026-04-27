@@ -110,6 +110,7 @@ flowchart LR
 - Automatic profile patch after report generation: appends a row to the recent-weeks table, updates milestone statuses, and sets the last-updated date
 - Next-plan generation from the freshly closed block, using the just-patched profile for the freshest context
 - Profile patch failure is non-fatal — the plan is generated regardless
+- The close-block HTTP endpoint runs asynchronously: it validates inputs synchronously, returns `202 Accepted` immediately, and runs the multi-minute report+patch+plan chain in the background so it does not get aborted by reverse-proxy request timeouts (e.g. Cloudflare's ~100s ceiling); refresh the admin page in a few minutes to see results, or watch the live Logs tab for progress
 - Standalone report/plan generation capability still exists in the backend, but the admin UI now centers the combined close-block workflow
 - Claude analysis of completed periods using workouts, metrics, notes, and athlete profile context
 - HTML rendering stored in `reports.full_html`

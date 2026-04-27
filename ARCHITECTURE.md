@@ -190,6 +190,7 @@ progress_analyses table (single saved interpretation + prompts)
 
 - report periods and plan periods share the same generation pipeline
 - the main admin workflow is now “close block -> generate report -> patch profile -> generate next 7-day plan”
+- the HTTP close-block endpoint dispatches the chain asynchronously: it validates inputs synchronously, returns `202 Accepted` immediately, and runs the multi-minute Claude calls in a background goroutine on a detached context so reverse-proxy timeouts cannot abort the work mid-chain; a single-flight guard prevents concurrent runs
 - after the report is generated, a lightweight profile patch updates three structured sections: the recent-weeks rolling table, Stelvio readiness milestone statuses, and the last-updated date
 - the patch runs automatically as part of the close-block flow so the plan benefits from the freshest profile context
 - patch failure is non-fatal — logged as a warning, plan generation continues regardless

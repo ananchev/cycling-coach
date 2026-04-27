@@ -49,32 +49,29 @@ func TestCloseBlockReportHandler_GeneratesReportAndPlan(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodPost, "/api/report/close-block", bytes.NewBufferString(`{"block_end":"2026-03-14","user_prompt":"Travel Tuesday"}`))
 	rr := httptest.NewRecorder()
-	closeBlockReportHandler(orch)(rr, req)
+	runner := newCloseBlockRunner(orch)
+	closeBlockReportHandler(runner)(rr, req)
 
-	if rr.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200: %s", rr.Code, rr.Body.String())
+	if rr.Code != http.StatusAccepted {
+		t.Fatalf("status = %d, want 202: %s", rr.Code, rr.Body.String())
 	}
 
 	var resp struct {
-		ReportID   int64  `json:"report_id"`
-		PlanID     int64  `json:"plan_id"`
+		Status     string `json:"status"`
 		BlockStart string `json:"block_start"`
 		BlockEnd   string `json:"block_end"`
-		PlanStart  string `json:"plan_start"`
-		PlanEnd    string `json:"plan_end"`
 	}
 	if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
+	if resp.Status != "started" {
+		t.Errorf("status = %q, want %q", resp.Status, "started")
+	}
 	if resp.BlockStart != "2026-03-09" || resp.BlockEnd != "2026-03-14" {
 		t.Errorf("block window = %s to %s", resp.BlockStart, resp.BlockEnd)
 	}
-	if resp.PlanStart != "2026-03-15" || resp.PlanEnd != "2026-03-21" {
-		t.Errorf("plan window = %s to %s", resp.PlanStart, resp.PlanEnd)
-	}
-	if resp.ReportID <= 0 || resp.PlanID <= 0 {
-		t.Errorf("report_id/plan_id = %d/%d, want positive ids", resp.ReportID, resp.PlanID)
-	}
+
+	runner.Wait()
 
 	plan, err := storage.GetReport(db, storage.ReportTypeWeeklyPlan, time.Date(2026, 3, 15, 0, 0, 0, 0, time.UTC))
 	if err != nil {
@@ -82,6 +79,13 @@ func TestCloseBlockReportHandler_GeneratesReportAndPlan(t *testing.T) {
 	}
 	if plan.UserPrompt == "" {
 		t.Error("expected saved plan prompt to be populated")
+	}
+	report, err := storage.GetReport(db, storage.ReportTypeWeeklyReport, time.Date(2026, 3, 9, 0, 0, 0, 0, time.UTC))
+	if err != nil {
+		t.Fatalf("GetReport(report): %v", err)
+	}
+	if report.ID == 0 {
+		t.Error("expected report row to be persisted")
 	}
 }
 
@@ -102,7 +106,7 @@ func TestCloseBlockReportHandler_BadRequestWithoutAnchorReport(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/api/report/close-block", bytes.NewBufferString(`{"block_end":"2026-03-14"}`))
 	rr := httptest.NewRecorder()
 	r := chi.NewRouter()
-	r.Post("/api/report/close-block", closeBlockReportHandler(orch))
+	r.Post("/api/report/close-block", closeBlockReportHandler(newCloseBlockRunner(orch)))
 	r.ServeHTTP(rr, req)
 
 	if rr.Code != http.StatusBadRequest {
@@ -132,12 +136,13 @@ func TestCloseBlockReportHandler_FirstRunAcceptsInitialBlockStart(t *testing.T) 
 
 	req := httptest.NewRequest(http.MethodPost, "/api/report/close-block", bytes.NewBufferString(`{"initial_block_start":"2026-03-03","block_end":"2026-03-14","user_prompt":"Travel Tuesday"}`))
 	rr := httptest.NewRecorder()
+	runner := newCloseBlockRunner(orch)
 	r := chi.NewRouter()
-	r.Post("/api/report/close-block", closeBlockReportHandler(orch))
+	r.Post("/api/report/close-block", closeBlockReportHandler(runner))
 	r.ServeHTTP(rr, req)
 
-	if rr.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200: %s", rr.Code, rr.Body.String())
+	if rr.Code != http.StatusAccepted {
+		t.Fatalf("status = %d, want 202: %s", rr.Code, rr.Body.String())
 	}
 
 	var resp struct {
@@ -150,4 +155,6 @@ func TestCloseBlockReportHandler_FirstRunAcceptsInitialBlockStart(t *testing.T) 
 	if resp.BlockStart != "2026-03-03" || resp.BlockEnd != "2026-03-14" {
 		t.Errorf("block window = %s to %s", resp.BlockStart, resp.BlockEnd)
 	}
+
+	runner.Wait()
 }
