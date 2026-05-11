@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log/slog"
 	"os"
 	"strings"
 	"time"
@@ -69,7 +68,6 @@ func PatchProfile(ctx context.Context, profilePath string, provider *ClaudeProvi
 		return nil, fmt.Errorf("reporting.PatchProfile: write patched profile: %w", err)
 	}
 
-	slog.Info("reporting: profile patched after block close", "backup", backupPath)
 	return &PatchProfileResult{BackupPath: backupPath}, nil
 }
 
