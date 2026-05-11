@@ -55,8 +55,9 @@ type RideSummary struct {
 	AvgCadence      *float64
 	NormalizedPower *float64
 	IntensityFactor *float64
-	HRDriftPct      *float64
-	TSS             *float64
+	HRDriftPct       *float64
+	TSS              *float64
+	VariabilityIndex *float64
 	// Zone distributions (%)
 	HRZ1Pct, HRZ2Pct, HRZ3Pct, HRZ4Pct, HRZ5Pct          *float64
 	PwrZ1Pct, PwrZ2Pct, PwrZ3Pct, PwrZ4Pct, PwrZ5Pct     *float64

@@ -321,4 +321,7 @@ var migrations = []string{
 	`ALTER TABLE athlete_notes ADD COLUMN muscle_mass_kg REAL`,
 	`ALTER TABLE athlete_notes ADD COLUMN body_water_pct REAL`,
 	`ALTER TABLE athlete_notes ADD COLUMN bmr_kcal REAL`,
+
+	// Migration: add variability index (NP/avg power) to ride_metrics.
+	`ALTER TABLE ride_metrics ADD COLUMN variability_index REAL`,
 }

@@ -484,3 +484,40 @@ func TestComputeCadenceDistribution(t *testing.T) {
 		t.Errorf("CadGE100Pct = %.1f, want 25", m.CadGE100Pct)
 	}
 }
+
+func TestCompute_VariabilityIndex(t *testing.T) {
+	// Steady ride: NP ≈ AvgPower, so VI ≈ 1.00
+	steady := makeRecords(120, 140, 200, 80)
+	mSteady := Compute(&fitpkg.ParsedFIT{Session: fitpkg.Session{DurationSec: 120}, Records: steady}, testZones)
+	if mSteady.VariabilityIndex == 0 {
+		t.Fatal("steady ride: VariabilityIndex is 0, expected ~1.0")
+	}
+	if math.Abs(mSteady.VariabilityIndex-1.0) > 0.05 {
+		t.Errorf("steady ride: VI=%.3f, want ≈1.0", mSteady.VariabilityIndex)
+	}
+
+	// Interval ride: alternating 30s blocks of 100W and 300W.
+	// AvgPower ≈ 200W; NP is pulled high by the 4th-power weighting → VI > 1.0.
+	recs := make([]fitpkg.Record, 120)
+	for i := range recs {
+		p := uint16(100)
+		if (i/30)%2 == 1 {
+			p = 300
+		}
+		recs[i] = fitpkg.Record{
+			Timestamp: time.Now().Add(time.Duration(i) * time.Second),
+			HeartRate: 140, Power: p, Cadence: 80,
+		}
+	}
+	mIntermittent := Compute(&fitpkg.ParsedFIT{Session: fitpkg.Session{DurationSec: 120}, Records: recs}, testZones)
+	if mIntermittent.VariabilityIndex <= 1.0 {
+		t.Errorf("intermittent ride: VI=%.3f, want >1.0", mIntermittent.VariabilityIndex)
+	}
+
+	// No power data: VI should be 0.
+	noPower := makeRecords(60, 140, 0, 80)
+	mNoPower := Compute(&fitpkg.ParsedFIT{Session: fitpkg.Session{DurationSec: 60}, Records: noPower}, testZones)
+	if mNoPower.VariabilityIndex != 0 {
+		t.Errorf("no-power ride: VI=%.3f, want 0", mNoPower.VariabilityIndex)
+	}
+}

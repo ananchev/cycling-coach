@@ -152,8 +152,9 @@ type WorkoutWithMetrics struct {
 	Cad70To85Pct    *float64
 	Cad85To100Pct   *float64
 	CadGE100Pct     *float64
-	ZoneTimeline    *string
-	HRZoneTimeline  *string
+	VariabilityIndex *float64
+	ZoneTimeline     *string
+	HRZoneTimeline   *string
 	// Notes linked to this workout, split by type
 	RideNotes    *string // type='ride' notes concatenated
 	GeneralNotes *string // type='note' notes concatenated
@@ -169,7 +170,7 @@ func ListWorkoutsWithMetrics(db *sql.DB, from, to time.Time, limit int) ([]Worko
 		       m.pwr_z1_pct, m.pwr_z2_pct, m.pwr_z3_pct, m.pwr_z4_pct, m.pwr_z5_pct,
 		       m.hr_z1_pct, m.hr_z2_pct, m.hr_z3_pct, m.hr_z4_pct, m.hr_z5_pct,
 		       m.cad_lt70_pct, m.cad_70_85_pct, m.cad_85_100_pct, m.cad_ge100_pct,
-		       m.zone_timeline, m.hr_zone_timeline,
+		       m.zone_timeline, m.hr_zone_timeline, m.variability_index,
 		       GROUP_CONCAT(CASE WHEN n.type='ride' THEN n.note END, ' | '),
 		       GROUP_CONCAT(CASE WHEN n.type='note' THEN n.note END, ' | ')
 		FROM workouts w
@@ -205,7 +206,7 @@ func ListWorkoutsWithMetrics(db *sql.DB, from, to time.Time, limit int) ([]Worko
 			&wm.PwrZ1Pct, &wm.PwrZ2Pct, &wm.PwrZ3Pct, &wm.PwrZ4Pct, &wm.PwrZ5Pct,
 			&wm.HRZ1Pct, &wm.HRZ2Pct, &wm.HRZ3Pct, &wm.HRZ4Pct, &wm.HRZ5Pct,
 			&wm.CadLT70Pct, &wm.Cad70To85Pct, &wm.Cad85To100Pct, &wm.CadGE100Pct,
-			&wm.ZoneTimeline, &wm.HRZoneTimeline,
+			&wm.ZoneTimeline, &wm.HRZoneTimeline, &wm.VariabilityIndex,
 			&wm.RideNotes, &wm.GeneralNotes,
 		); err != nil {
 			return nil, fmt.Errorf("storage.ListWorkoutsWithMetrics: scan: %w", err)
@@ -225,7 +226,7 @@ func GetWorkoutWithMetricsByID(db *sql.DB, id int64) (*WorkoutWithMetrics, error
 		       m.pwr_z1_pct, m.pwr_z2_pct, m.pwr_z3_pct, m.pwr_z4_pct, m.pwr_z5_pct,
 		       m.hr_z1_pct, m.hr_z2_pct, m.hr_z3_pct, m.hr_z4_pct, m.hr_z5_pct,
 		       m.cad_lt70_pct, m.cad_70_85_pct, m.cad_85_100_pct, m.cad_ge100_pct,
-		       m.zone_timeline, m.hr_zone_timeline,
+		       m.zone_timeline, m.hr_zone_timeline, m.variability_index,
 		       GROUP_CONCAT(CASE WHEN n.type='ride' THEN n.note END, ' | '),
 		       GROUP_CONCAT(CASE WHEN n.type='note' THEN n.note END, ' | ')
 		FROM workouts w
@@ -243,7 +244,7 @@ func GetWorkoutWithMetricsByID(db *sql.DB, id int64) (*WorkoutWithMetrics, error
 		&wm.PwrZ1Pct, &wm.PwrZ2Pct, &wm.PwrZ3Pct, &wm.PwrZ4Pct, &wm.PwrZ5Pct,
 		&wm.HRZ1Pct, &wm.HRZ2Pct, &wm.HRZ3Pct, &wm.HRZ4Pct, &wm.HRZ5Pct,
 		&wm.CadLT70Pct, &wm.Cad70To85Pct, &wm.Cad85To100Pct, &wm.CadGE100Pct,
-		&wm.ZoneTimeline, &wm.HRZoneTimeline,
+		&wm.ZoneTimeline, &wm.HRZoneTimeline, &wm.VariabilityIndex,
 		&wm.RideNotes, &wm.GeneralNotes,
 	); err != nil {
 		return nil, fmt.Errorf("storage.GetWorkoutWithMetricsByID: %w", err)

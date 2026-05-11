@@ -50,6 +50,7 @@ func AssembleInput(ctx context.Context, db *sql.DB, profilePath string, reportTy
 			rs.IntensityFactor = metrics.IntensityFactor
 			rs.HRDriftPct = metrics.HRDriftPct
 			rs.TSS = metrics.TSS
+			rs.VariabilityIndex = metrics.VariabilityIndex
 			rs.HRZ1Pct = metrics.HRZ1Pct
 			rs.HRZ2Pct = metrics.HRZ2Pct
 			rs.HRZ3Pct = metrics.HRZ3Pct
@@ -155,22 +156,24 @@ func BuildPrompt(input *ReportInput) string {
 	if len(input.Rides) == 0 {
 		b.WriteString("No rides recorded in this period.\n\n")
 	} else {
-		b.WriteString("Date       | Type            | Dur(min) | AvgP(W) | NP(W) | IF   | AvgHR | AvgCad | Drift% | TSS\n")
-		b.WriteString("-----------|-----------------|----------|---------|-------|------|-------|--------|--------|-----\n")
+		b.WriteString("Date       | Type            | Dur(min) | AvgP(W) | NP(W) | IF   |  VI  | AvgHR | AvgCad | Drift% | TSS\n")
+		b.WriteString("-----------|-----------------|----------|---------|-------|------|------|-------|--------|--------|-----\n")
 		for _, r := range input.Rides {
-			fmt.Fprintf(&b, "%s | %-15s | %s | %s | %s | %s | %s | %s | %s | %s\n",
+			fmt.Fprintf(&b, "%s | %-15s | %s | %s | %s | %s | %s | %s | %s | %s | %s\n",
 				r.Date.Format("2006-01-02"),
 				padOrDash(r.WorkoutType, 15),
 				fmtOptFloat(r.DurationMin, "%.0f"),
 				fmtOptFloat(r.AvgPower, "%.0f"),
 				fmtOptFloat(r.NormalizedPower, "%.0f"),
 				fmtOptFloat(r.IntensityFactor, "%.2f"),
+				fmtOptFloat(r.VariabilityIndex, "%.2f"),
 				fmtOptFloat(r.AvgHR, "%.0f"),
 				fmtOptFloat(r.AvgCadence, "%.0f"),
 				fmtOptFloat(r.HRDriftPct, "%.1f"),
 				fmtOptFloat(r.TSS, "%.0f"),
 			)
 		}
+		b.WriteString("\nVI (Variability Index) = NP/AvgPower. VI ≥1.15 signals intermittent/stop-go riding — use power zone percentages as the primary effort signal for those rides rather than the zone timeline.\n")
 		b.WriteString("\n")
 
 		// Per-ride detail: zone distributions and power zone timeline.

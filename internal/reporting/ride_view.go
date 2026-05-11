@@ -15,14 +15,15 @@ func FormatWorkoutSummaryTable(w *storage.WorkoutWithMetrics) string {
 	}
 
 	var b strings.Builder
-	b.WriteString("Date       | Type            | Dur(min) | AvgP(W) | NP(W) | IF    | AvgHR | AvgCad | Drift% | TSS\n")
-	fmt.Fprintf(&b, "%-10s | %-15s | %8s | %7s | %5s | %5s | %5s | %6s | %6s | %3s",
+	b.WriteString("Date       | Type            | Dur(min) | AvgP(W) | NP(W) | IF    |  VI  | AvgHR | AvgCad | Drift% | TSS\n")
+	fmt.Fprintf(&b, "%-10s | %-15s | %8s | %7s | %5s | %5s | %4s | %5s | %6s | %6s | %3s",
 		w.StartedAt.Format("2006-01-02"),
 		padOrDash(workoutTypeLabel(w.WorkoutType), 15),
 		fmtDurationMin(w.DurationSec),
 		fmtOptFloat(w.AvgPower, "%.0f"),
 		fmtOptFloat(w.NormalizedPower, "%.0f"),
 		fmtOptFloat(w.IntensityFactor, "%.2f"),
+		fmtOptFloat(w.VariabilityIndex, "%.2f"),
 		fmtOptFloat(w.AvgHR, "%.0f"),
 		fmtOptFloat(w.AvgCadence, "%.0f"),
 		fmtOptFloat(w.HRDriftPct, "%.1f"),

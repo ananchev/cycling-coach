@@ -312,8 +312,9 @@ type ComputedMetrics struct {
 	HRZ1Pct, HRZ2Pct, HRZ3Pct, HRZ4Pct, HRZ5Pct          float64
 	PwrZ1Pct, PwrZ2Pct, PwrZ3Pct, PwrZ4Pct, PwrZ5Pct     float64
 	CadLT70Pct, Cad70To85Pct, Cad85To100Pct, CadGE100Pct float64
-	ZoneTimeline                                         string // JSON array of ZoneSegment
-	HRZoneTimeline                                       string // JSON array of HRZoneSegment
+	VariabilityIndex                                     float64 // NP / AvgPower; 0 when not computable
+	ZoneTimeline                                         string  // JSON array of ZoneSegment
+	HRZoneTimeline                                       string  // JSON array of HRZoneSegment
 }
 
 const hrRest = 50 // assumed resting HR for TRIMP; no config key yet
@@ -436,6 +437,11 @@ func Compute(p *fitpkg.ParsedFIT, z ZoneConfig) ComputedMetrics {
 		}
 	}
 
+	// Variability Index = NP / AvgPower (measures ride intermittency; >1.15 signals stop-go/technical terrain).
+	if m.NormalizedPower > 0 && m.AvgPower > 0 {
+		m.VariabilityIndex = m.NormalizedPower / m.AvgPower
+	}
+
 	// Efficiency Factor = AvgPower / AvgHR.
 	if m.AvgHR > 0 && m.AvgPower > 0 {
 		m.EfficiencyFactor = m.AvgPower / m.AvgHR
@@ -494,6 +500,7 @@ func (m ComputedMetrics) ToStorageMetrics(workoutID int64) *storage.RideMetrics 
 		Cad70To85Pct:     p(m.Cad70To85Pct),
 		Cad85To100Pct:    p(m.Cad85To100Pct),
 		CadGE100Pct:      p(m.CadGE100Pct),
+		VariabilityIndex: p(m.VariabilityIndex),
 		ZoneTimeline:     pStr(m.ZoneTimeline),
 		HRZoneTimeline:   pStr(m.HRZoneTimeline),
 	}

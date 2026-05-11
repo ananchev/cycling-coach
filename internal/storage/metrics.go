@@ -37,6 +37,7 @@ type RideMetrics struct {
 	Cad70To85Pct     *float64
 	Cad85To100Pct    *float64
 	CadGE100Pct      *float64
+	VariabilityIndex *float64
 	ZoneTimeline     *string // JSON array of power zone segments
 	HRZoneTimeline   *string // JSON array of HR zone segments
 	CreatedAt        time.Time
@@ -53,8 +54,8 @@ func UpsertRideMetrics(db *sql.DB, m *RideMetrics) error {
 			hr_z1_pct, hr_z2_pct, hr_z3_pct, hr_z4_pct, hr_z5_pct,
 			pwr_z1_pct, pwr_z2_pct, pwr_z3_pct, pwr_z4_pct, pwr_z5_pct,
 			cad_lt70_pct, cad_70_85_pct, cad_85_100_pct, cad_ge100_pct,
-			zone_timeline, hr_zone_timeline
-		) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			zone_timeline, hr_zone_timeline, variability_index
+		) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(workout_id) DO UPDATE SET
 			duration_min=excluded.duration_min,
 			avg_hr=excluded.avg_hr,
@@ -84,14 +85,15 @@ func UpsertRideMetrics(db *sql.DB, m *RideMetrics) error {
 			cad_85_100_pct=excluded.cad_85_100_pct,
 			cad_ge100_pct=excluded.cad_ge100_pct,
 			zone_timeline=excluded.zone_timeline,
-			hr_zone_timeline=excluded.hr_zone_timeline`,
+			hr_zone_timeline=excluded.hr_zone_timeline,
+			variability_index=excluded.variability_index`,
 		m.WorkoutID, m.DurationMin, m.AvgHR, m.MaxHR, m.AvgPower, m.MaxPower,
 		m.AvgCadence, m.NormalizedPower, m.IntensityFactor, m.TSS, m.TRIMP,
 		m.EfficiencyFactor, m.HRDriftPct, m.DecouplingPct,
 		m.HRZ1Pct, m.HRZ2Pct, m.HRZ3Pct, m.HRZ4Pct, m.HRZ5Pct,
 		m.PwrZ1Pct, m.PwrZ2Pct, m.PwrZ3Pct, m.PwrZ4Pct, m.PwrZ5Pct,
 		m.CadLT70Pct, m.Cad70To85Pct, m.Cad85To100Pct, m.CadGE100Pct,
-		m.ZoneTimeline, m.HRZoneTimeline,
+		m.ZoneTimeline, m.HRZoneTimeline, m.VariabilityIndex,
 	)
 	if err != nil {
 		return fmt.Errorf("storage.UpsertRideMetrics: %w", err)
@@ -108,7 +110,7 @@ func GetRideMetrics(db *sql.DB, workoutID int64) (*RideMetrics, error) {
 		       hr_z1_pct, hr_z2_pct, hr_z3_pct, hr_z4_pct, hr_z5_pct,
 		       pwr_z1_pct, pwr_z2_pct, pwr_z3_pct, pwr_z4_pct, pwr_z5_pct,
 		       cad_lt70_pct, cad_70_85_pct, cad_85_100_pct, cad_ge100_pct,
-		       zone_timeline, hr_zone_timeline, created_at
+		       zone_timeline, hr_zone_timeline, variability_index, created_at
 		FROM ride_metrics WHERE workout_id = ?`, workoutID)
 
 	var m RideMetrics
@@ -119,7 +121,7 @@ func GetRideMetrics(db *sql.DB, workoutID int64) (*RideMetrics, error) {
 		&m.HRZ1Pct, &m.HRZ2Pct, &m.HRZ3Pct, &m.HRZ4Pct, &m.HRZ5Pct,
 		&m.PwrZ1Pct, &m.PwrZ2Pct, &m.PwrZ3Pct, &m.PwrZ4Pct, &m.PwrZ5Pct,
 		&m.CadLT70Pct, &m.Cad70To85Pct, &m.Cad85To100Pct, &m.CadGE100Pct,
-		&m.ZoneTimeline, &m.HRZoneTimeline, &m.CreatedAt,
+		&m.ZoneTimeline, &m.HRZoneTimeline, &m.VariabilityIndex, &m.CreatedAt,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("storage.GetRideMetrics: %w", err)
