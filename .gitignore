@@ -9,6 +9,7 @@ server
 # Data
 data/
 *.db*
+testdata/
 
 # IDE
 .vscode/
