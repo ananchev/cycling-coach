@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"math"
 	"strconv"
+	"time"
 
 	fitpkg "cycling-coach/internal/fit"
 	"cycling-coach/internal/storage"
@@ -75,28 +76,53 @@ type HRZoneSegment struct {
 }
 
 // ComputeZoneTimeline derives contiguous power zone segments from per-second records.
-// Segments shorter than minSegmentSec are merged into the surrounding segment to avoid
-// noise from brief power fluctuations (e.g. gear changes, coasting through a corner).
-func ComputeZoneTimeline(records []fitpkg.Record, z ZoneConfig, minSegmentSec int) []ZoneSegment {
+// smoothingWindowSec, if > 0, applies a centred rolling average over that many seconds
+// before zone classification, eliminating 1–2 second power spikes from real power meters.
+// Segments shorter than minSegmentSec are merged into the surrounding segment.
+// Elapsed time is derived from actual record timestamps, so coasting gaps are preserved.
+func ComputeZoneTimeline(records []fitpkg.Record, z ZoneConfig, minSegmentSec int, smoothingWindowSec int) []ZoneSegment {
 	if len(records) == 0 {
 		return nil
 	}
 
-	// Build raw per-second zone classification.
-	type classified struct {
-		zone int
-		pwr  float64
+	// Extract valid power records, keeping the original timestamp for each.
+	type validRec struct {
+		ts  time.Time
+		pwr float64
 	}
-	raw := make([]classified, 0, len(records))
+	valid := make([]validRec, 0, len(records))
 	for _, r := range records {
 		if !r.ValidPower() {
 			continue
 		}
-		zi := pwrZoneIndex(int(r.Power), z) + 1 // 1-based
-		raw = append(raw, classified{zone: zi, pwr: float64(r.Power)})
+		valid = append(valid, validRec{r.Timestamp, float64(r.Power)})
 	}
-	if len(raw) < minSegmentSec {
+	if len(valid) < minSegmentSec {
 		return nil
+	}
+
+	// Determine the zone for each record, optionally via a centred rolling average.
+	zoneFor := make([]int, len(valid))
+	if smoothingWindowSec > 0 {
+		half := smoothingWindowSec / 2
+		for i := range valid {
+			lo, hi := i-half, i+half+1
+			if lo < 0 {
+				lo = 0
+			}
+			if hi > len(valid) {
+				hi = len(valid)
+			}
+			var sum float64
+			for j := lo; j < hi; j++ {
+				sum += valid[j].pwr
+			}
+			zoneFor[i] = pwrZoneIndex(int(sum/float64(hi-lo)), z) + 1
+		}
+	} else {
+		for i, r := range valid {
+			zoneFor[i] = pwrZoneIndex(int(r.pwr), z) + 1
+		}
 	}
 
 	// Build initial segments from consecutive same-zone records.
@@ -106,14 +132,14 @@ func ComputeZoneTimeline(records []fitpkg.Record, z ZoneConfig, minSegmentSec in
 		endIdx   int // exclusive
 		pwrSum   float64
 	}
-	segs := []rawSeg{{zone: raw[0].zone, startIdx: 0, endIdx: 1, pwrSum: raw[0].pwr}}
-	for i := 1; i < len(raw); i++ {
+	segs := []rawSeg{{zone: zoneFor[0], startIdx: 0, endIdx: 1, pwrSum: valid[0].pwr}}
+	for i := 1; i < len(valid); i++ {
 		cur := &segs[len(segs)-1]
-		if raw[i].zone == cur.zone {
+		if zoneFor[i] == cur.zone {
 			cur.endIdx = i + 1
-			cur.pwrSum += raw[i].pwr
+			cur.pwrSum += valid[i].pwr
 		} else {
-			segs = append(segs, rawSeg{zone: raw[i].zone, startIdx: i, endIdx: i + 1, pwrSum: raw[i].pwr})
+			segs = append(segs, rawSeg{zone: zoneFor[i], startIdx: i, endIdx: i + 1, pwrSum: valid[i].pwr})
 		}
 	}
 
@@ -124,12 +150,10 @@ func ComputeZoneTimeline(records []fitpkg.Record, z ZoneConfig, minSegmentSec in
 		for _, s := range segs {
 			dur := s.endIdx - s.startIdx
 			if dur < minSegmentSec && len(merged) > 0 {
-				// Absorb into previous segment.
 				merged[len(merged)-1].endIdx = s.endIdx
 				merged[len(merged)-1].pwrSum += s.pwrSum
 				changed = true
 			} else {
-				// Try to merge with previous if same zone.
 				if len(merged) > 0 && merged[len(merged)-1].zone == s.zone {
 					merged[len(merged)-1].endIdx = s.endIdx
 					merged[len(merged)-1].pwrSum += s.pwrSum
@@ -142,14 +166,18 @@ func ComputeZoneTimeline(records []fitpkg.Record, z ZoneConfig, minSegmentSec in
 		segs = merged
 	}
 
-	// Convert to output format.
+	// Convert to output format using actual timestamps for elapsed time.
+	startRef := valid[0].ts
 	out := make([]ZoneSegment, 0, len(segs))
 	for _, s := range segs {
 		n := float64(s.endIdx - s.startIdx)
+		startMin := valid[s.startIdx].ts.Sub(startRef).Minutes()
+		// Add 1 second for the last record so the segment covers its full second.
+		endMin := valid[s.endIdx-1].ts.Sub(startRef).Minutes() + 1.0/60.0
 		out = append(out, ZoneSegment{
 			Zone:        s.zone,
-			StartMin:    float64(s.startIdx) / 60.0,
-			DurationMin: n / 60.0,
+			StartMin:    startMin,
+			DurationMin: endMin - startMin,
 			AvgPower:    s.pwrSum / n,
 		})
 	}
@@ -157,26 +185,25 @@ func ComputeZoneTimeline(records []fitpkg.Record, z ZoneConfig, minSegmentSec in
 }
 
 // ComputeHRZoneTimeline derives contiguous HR zone segments from per-second records.
-// Segments shorter than minSegmentSec are merged into the surrounding segment to avoid
-// noise from brief HR fluctuations.
+// Segments shorter than minSegmentSec are merged into the surrounding segment.
+// Elapsed time is derived from actual record timestamps.
 func ComputeHRZoneTimeline(records []fitpkg.Record, z ZoneConfig, minSegmentSec int) []HRZoneSegment {
 	if len(records) == 0 {
 		return nil
 	}
 
-	type classified struct {
-		zone int
-		hr   float64
+	type validRec struct {
+		ts time.Time
+		hr float64
 	}
-	raw := make([]classified, 0, len(records))
+	valid := make([]validRec, 0, len(records))
 	for _, r := range records {
 		if !r.ValidHR() {
 			continue
 		}
-		zi := hrZoneIndex(int(r.HeartRate), z) + 1 // 1-based
-		raw = append(raw, classified{zone: zi, hr: float64(r.HeartRate)})
+		valid = append(valid, validRec{r.Timestamp, float64(r.HeartRate)})
 	}
-	if len(raw) < minSegmentSec {
+	if len(valid) < minSegmentSec {
 		return nil
 	}
 
@@ -186,14 +213,16 @@ func ComputeHRZoneTimeline(records []fitpkg.Record, z ZoneConfig, minSegmentSec 
 		endIdx   int // exclusive
 		hrSum    float64
 	}
-	segs := []rawSeg{{zone: raw[0].zone, startIdx: 0, endIdx: 1, hrSum: raw[0].hr}}
-	for i := 1; i < len(raw); i++ {
+	firstZone := hrZoneIndex(int(valid[0].hr), z) + 1
+	segs := []rawSeg{{zone: firstZone, startIdx: 0, endIdx: 1, hrSum: valid[0].hr}}
+	for i := 1; i < len(valid); i++ {
+		zi := hrZoneIndex(int(valid[i].hr), z) + 1
 		cur := &segs[len(segs)-1]
-		if raw[i].zone == cur.zone {
+		if zi == cur.zone {
 			cur.endIdx = i + 1
-			cur.hrSum += raw[i].hr
+			cur.hrSum += valid[i].hr
 		} else {
-			segs = append(segs, rawSeg{zone: raw[i].zone, startIdx: i, endIdx: i + 1, hrSum: raw[i].hr})
+			segs = append(segs, rawSeg{zone: zi, startIdx: i, endIdx: i + 1, hrSum: valid[i].hr})
 		}
 	}
 
@@ -219,13 +248,16 @@ func ComputeHRZoneTimeline(records []fitpkg.Record, z ZoneConfig, minSegmentSec 
 		segs = merged
 	}
 
+	startRef := valid[0].ts
 	out := make([]HRZoneSegment, 0, len(segs))
 	for _, s := range segs {
 		n := float64(s.endIdx - s.startIdx)
+		startMin := valid[s.startIdx].ts.Sub(startRef).Minutes()
+		endMin := valid[s.endIdx-1].ts.Sub(startRef).Minutes() + 1.0/60.0
 		out = append(out, HRZoneSegment{
 			Zone:        s.zone,
-			StartMin:    float64(s.startIdx) / 60.0,
-			DurationMin: n / 60.0,
+			StartMin:    startMin,
+			DurationMin: endMin - startMin,
 			AvgHR:       s.hrSum / n,
 		})
 	}
@@ -233,9 +265,11 @@ func ComputeHRZoneTimeline(records []fitpkg.Record, z ZoneConfig, minSegmentSec 
 }
 
 // ZoneTimelineJSON computes the zone timeline and returns it as a JSON string.
+// A 30-second centred rolling average is applied before zone classification to
+// eliminate per-pedal-stroke noise from real power meters.
 // Returns empty string if no timeline could be computed.
 func ZoneTimelineJSON(records []fitpkg.Record, z ZoneConfig) string {
-	segs := ComputeZoneTimeline(records, z, 60) // 60-second minimum segment
+	segs := ComputeZoneTimeline(records, z, 60, 30)
 	if len(segs) == 0 {
 		return ""
 	}
@@ -249,7 +283,7 @@ func ZoneTimelineJSON(records []fitpkg.Record, z ZoneConfig) string {
 // HRZoneTimelineJSON computes the HR zone timeline and returns it as a JSON string.
 // Returns empty string if no timeline could be computed.
 func HRZoneTimelineJSON(records []fitpkg.Record, z ZoneConfig) string {
-	segs := ComputeHRZoneTimeline(records, z, 60) // 60-second minimum segment
+	segs := ComputeHRZoneTimeline(records, z, 60)
 	if len(segs) == 0 {
 		return ""
 	}

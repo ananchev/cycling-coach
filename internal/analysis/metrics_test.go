@@ -255,7 +255,7 @@ func TestToStorageMetrics_NonNilForNonZeros(t *testing.T) {
 func TestComputeZoneTimeline_SteadyZ2(t *testing.T) {
 	// 300 seconds at 150W = all Z2 (PwrZ2Max=160) → single segment.
 	records := makeRecords(300, 130, 150, 80)
-	segs := ComputeZoneTimeline(records, testZones, 60)
+	segs := ComputeZoneTimeline(records, testZones, 60, 0)
 
 	if len(segs) != 1 {
 		t.Fatalf("got %d segments, want 1", len(segs))
@@ -290,7 +290,7 @@ func TestComputeZoneTimeline_Intervals(t *testing.T) {
 	addBlock(120, 195) // Z4 interval
 	addBlock(120, 150) // Z2 cooldown
 
-	segs := ComputeZoneTimeline(records, testZones, 60)
+	segs := ComputeZoneTimeline(records, testZones, 60, 0)
 
 	if len(segs) != 5 {
 		t.Fatalf("got %d segments, want 5; segs: %+v", len(segs), segs)
@@ -324,7 +324,7 @@ func TestComputeZoneTimeline_ShortSpikeMerged(t *testing.T) {
 	addBlock(30, 195)  // Z4 spike — too short, should be absorbed
 	addBlock(180, 150) // Z2
 
-	segs := ComputeZoneTimeline(records, testZones, 60)
+	segs := ComputeZoneTimeline(records, testZones, 60, 0)
 
 	if len(segs) != 1 {
 		t.Fatalf("got %d segments, want 1 (spike should be merged); segs: %+v", len(segs), segs)
@@ -336,7 +336,7 @@ func TestComputeZoneTimeline_ShortSpikeMerged(t *testing.T) {
 
 func TestComputeZoneTimeline_TooFewRecords(t *testing.T) {
 	records := makeRecords(30, 130, 150, 80) // less than minSegmentSec
-	segs := ComputeZoneTimeline(records, testZones, 60)
+	segs := ComputeZoneTimeline(records, testZones, 60, 0)
 	if segs != nil {
 		t.Errorf("got %d segments, want nil for too few records", len(segs))
 	}
@@ -371,6 +371,66 @@ func TestComputeHRZoneTimeline_SteadyZ2(t *testing.T) {
 	}
 	if segs[0].DurationMin < 4.9 || segs[0].DurationMin > 5.1 {
 		t.Errorf("duration = %.1f min, want ~5.0", segs[0].DurationMin)
+	}
+}
+
+// TestComputeZoneTimeline_SmoothedBreaksCascade verifies that the 30-second rolling
+// average prevents the cascade-collapse that occurs when every raw power segment is
+// shorter than minSegmentSec.
+//
+// The ride is built from 5-second blocks that alternate between two zone-boundary-
+// crossing power values, so every raw segment is 5 s (well below the 60 s minimum).
+// Without smoothing, the merge loop absorbs them all into the first segment's zone.
+// With 30s smoothing the rolling average reveals the dominant zone in each block.
+//
+// testZones: PwrZ1Max=110, PwrZ2Max=160, PwrZ3Max=180, PwrZ4Max=200
+func TestComputeZoneTimeline_SmoothedBreaksCascade(t *testing.T) {
+	var records []fitpkg.Record
+	base := time.Now()
+	// Alternate between loW and hiW every 5 seconds.
+	addAlternating := func(totalSec int, loW, hiW uint16) {
+		offset := len(records)
+		for i := 0; i < totalSec; i++ {
+			p := loW
+			if (i/5)%2 == 1 {
+				p = hiW
+			}
+			records = append(records, fitpkg.Record{
+				Timestamp: base.Add(time.Duration(offset+i) * time.Second),
+				HeartRate: 140,
+				Power:     p,
+				Cadence:   80,
+			})
+		}
+	}
+	// 300 s Z1↔Z2 (108/150 W): raw segs are Z1(5s)/Z2(5s); 30s avg = 129 W → Z2.
+	addAlternating(300, 108, 150)
+	// 120 s Z2↔Z4 (150/195 W): raw segs are Z2(5s)/Z4(5s); 30s avg = 172 W → Z3.
+	addAlternating(120, 150, 195)
+	// 300 s Z1↔Z2 again.
+	addAlternating(300, 108, 150)
+
+	// Without smoothing: first raw segment is 5 s < 60 s; every subsequent short
+	// segment is absorbed into it, collapsing the whole ride to one zone.
+	unsmoothed := ComputeZoneTimeline(records, testZones, 60, 0)
+	if len(unsmoothed) != 1 {
+		t.Fatalf("unsmoothed: got %d segments, want 1 (cascade expected)", len(unsmoothed))
+	}
+
+	// With smoothing: at least the Z2 and Z3 blocks should emerge as distinct
+	// segments, and the max zone must be above Z1.
+	smoothed := ComputeZoneTimeline(records, testZones, 60, 30)
+	if len(smoothed) < 2 {
+		t.Fatalf("smoothed: got %d segments, want ≥2; segs: %+v", len(smoothed), smoothed)
+	}
+	maxZone := 0
+	for _, s := range smoothed {
+		if s.Zone > maxZone {
+			maxZone = s.Zone
+		}
+	}
+	if maxZone < 2 {
+		t.Errorf("smoothed: max zone = %d, want ≥2; segs: %+v", maxZone, smoothed)
 	}
 }
 
