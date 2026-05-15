@@ -1,0 +1,35 @@
+{
+  "items": [
+    {
+      "id": 242,
+      "wahoo_id": "99999242",
+      "date": "2025-11-04",
+      "type": "Cycling",
+      "duration_min": 60.0,
+      "avg_power_w": 201.0,
+      "np_w": 215.0,
+      "if": 0.86,
+      "vi": 1.07,
+      "avg_hr": 148.0,
+      "tss": 86.5,
+      "processed": true
+    },
+    {
+      "id": 241,
+      "wahoo_id": "99999241",
+      "date": "2025-11-03",
+      "type": "Cycling",
+      "duration_min": 90.0,
+      "avg_power_w": 178.0,
+      "np_w": 192.0,
+      "if": 0.77,
+      "vi": 1.079,
+      "avg_hr": 138.0,
+      "tss": 99.2,
+      "processed": true
+    }
+  ],
+  "_note": "In integration tests seed MCP_MAX_ROWS+1 rows so truncation fires with real data. This fixture shows the response shape only; items array is abbreviated.",
+  "truncated": true,
+  "hint": "Narrow the date range to see fewer results."
+}

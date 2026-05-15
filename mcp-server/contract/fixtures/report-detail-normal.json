@@ -1,0 +1,9 @@
+{
+  "id": 7,
+  "type": "weekly_report",
+  "week_start": "2025-10-27",
+  "week_end": "2025-11-02",
+  "created_at": "2025-11-02T21:01:43Z",
+  "summary_markdown": "**Training Report Oct 27–Nov 02**\n✅ 4 rides | TSS 590 | Avg IF 0.74\n📈 EF trending up (1.31 vs 1.26 prior block)\n⚠️ HR drift elevated on Sunday long ride (5.1%)\n🎯 On track for aerobic base target",
+  "narrative_markdown": "## Week Overview\n\nSolid week with 4 rides totalling 590 TSS. The standout session was Tuesday's 92-minute effort at IF 0.81 — power was well-distributed with 58% in Z2 and HR staying controlled at 142 bpm average.\n\n## Key Observations\n\n**Aerobic Efficiency** improved to 1.31 (up from 1.26 in the prior block), confirming the Z2 emphasis is paying dividends.\n\n**Endurance Durability** showed a slight regression — HR drift on the Sunday 3-hour ride reached 5.1%, suggesting fatigue accumulation mid-week. Recommend a lighter Wednesday to avoid this in the next block.\n\n## Recommendations for Next Block\n\n1. Keep Tuesday's threshold session but cap at 60 minutes to manage fatigue.\n2. Extend Sunday's long ride gradually — target 200+ minutes in 2 weeks.\n3. Add one Tempo interval (3×10 min at Z3) mid-week if recovery permits.\n"
+}

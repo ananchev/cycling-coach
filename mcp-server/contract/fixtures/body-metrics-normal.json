@@ -1,0 +1,36 @@
+{
+  "items": [
+    {
+      "date": "2025-10-06",
+      "weight_kg": 73.4,
+      "body_fat_pct": 13.8,
+      "muscle_mass_kg": 58.9,
+      "body_water_pct": 57.8,
+      "bmr_kcal": 1839.0
+    },
+    {
+      "date": "2025-10-13",
+      "weight_kg": 73.1,
+      "body_fat_pct": 13.5,
+      "muscle_mass_kg": 59.1,
+      "body_water_pct": 57.9,
+      "bmr_kcal": 1840.0
+    },
+    {
+      "date": "2025-11-02",
+      "weight_kg": 72.8,
+      "body_fat_pct": 13.2,
+      "muscle_mass_kg": 59.3,
+      "body_water_pct": 58.1,
+      "bmr_kcal": 1842.0
+    }
+  ],
+  "deltas": {
+    "weight_kg": -0.6,
+    "body_fat_pct": -0.6,
+    "muscle_mass_kg": 0.4,
+    "body_water_pct": 0.3,
+    "bmr_kcal": 3.0
+  },
+  "truncated": false
+}

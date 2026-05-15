@@ -1,0 +1,8 @@
+{
+  "period": {
+    "from": "2025-10-27",
+    "to": "2025-11-02"
+  },
+  "markdown": "# Training Block: Oct 27 – Nov 02\n\n## Athlete Profile Summary\nFTP 251W | HR Max 184 bpm | Weight 72.8 kg\n\n## Workouts\n\nDate       | Type            | Dur(min) | AvgP(W) | NP(W) | IF    |  VI  | AvgHR | AvgCad | Drift% | TSS\n2025-11-04 | Cycling         |     92.5 |     187 |   203 |  0.81 | 1.09 |   142 |     84 |    3.2 | 112\n2025-11-02 | Cycling         |    181.2 |     162 |   171 |  0.68 | 1.06 |   131 |     82 |    1.8 | 168\n\n### Zone Detail\n\n### 2025-11-04 Cycling\n\nPower zones: Z1=15% Z2=58% Z3=18% Z4=7% Z5=1%\nHR zones:    Z1=8% Z2=52% Z3=32% Z4=7% Z5=1%\nCadence:     <70=12% 70-85=45% 85-100=38% 100+=4%\n\n## Notes\n- 2025-11-04 (ride): RPE 7/10, strong on the climb\n- 2025-11-02 (note): Slept 8h, felt recovered\n\n## Body Metrics\n- 2025-11-02: 72.8 kg | BF 13.2% | Muscle 59.3 kg\n",
+  "truncated_chars": false
+}

@@ -1,0 +1,6 @@
+{
+  "ftp_w": 251,
+  "hr_max_bpm": 184,
+  "hr_zone_bounds": [109, 127, 145, 164],
+  "power_zone_bounds": [138, 188, 226, 263]
+}

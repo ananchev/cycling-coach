@@ -1,0 +1,16 @@
+{
+  "selected_range": { "from": "2025-10-06", "to": "2025-11-02", "days": 28 },
+  "prior_range":    { "from": "2025-09-08", "to": "2025-10-05", "days": 28 },
+  "aerobic_only_ef": true,
+  "kpis": {
+    "aerobic_efficiency":   { "current": null, "prior": null, "delta": null, "delta_pct": null, "trend": "steady" },
+    "endurance_durability": { "current": null, "prior": null, "delta": null, "delta_pct": null, "trend": "steady" },
+    "cumulative_tss":       { "current": null, "prior": null, "delta": null, "delta_pct": null, "trend": "steady" },
+    "cumulative_trimp":     { "current": null, "prior": null, "delta": null, "delta_pct": null, "trend": "steady" },
+    "average_if":           { "current": null, "prior": null, "delta": null, "delta_pct": null, "trend": "steady" },
+    "completion_rate":      { "current": 0.0,  "prior": null, "delta": null, "delta_pct": null, "trend": "steady" },
+    "average_weight_kg":    { "current": null, "prior": null, "delta": null, "delta_pct": null, "trend": "steady" }
+  },
+  "weekly_load": [],
+  "saved_narrative": null
+}

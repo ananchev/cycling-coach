@@ -1,0 +1,41 @@
+{
+  "id": 42,
+  "wahoo_id": "12345678",
+  "date": "2025-11-04",
+  "type": "Cycling",
+  "duration_min": 92.5,
+  "avg_power_w": 187.3,
+  "normalized_power_w": 203.1,
+  "intensity_factor": 0.81,
+  "variability_index": 1.085,
+  "avg_hr": 142.0,
+  "max_hr": 178.0,
+  "avg_cadence_rpm": 84.2,
+  "tss": 112.4,
+  "efficiency_factor": 1.31,
+  "hr_drift_pct": 3.2,
+  "processed": true,
+  "power_zones": {
+    "z1_pct": 15.2,
+    "z2_pct": 58.3,
+    "z3_pct": 18.1,
+    "z4_pct": 7.2,
+    "z5_pct": 1.2
+  },
+  "hr_zones": {
+    "z1_pct": 8.1,
+    "z2_pct": 52.4,
+    "z3_pct": 31.7,
+    "z4_pct": 7.1,
+    "z5_pct": 0.7
+  },
+  "cadence_bands": {
+    "lt70_pct": 12.3,
+    "z70_85_pct": 45.2,
+    "z85_100_pct": 38.1,
+    "ge100_pct": 4.4
+  },
+  "zone_detail_markdown": "### 2025-11-04 Cycling\n\nPower zones: Z1=15% Z2=58% Z3=18% Z4=7% Z5=1%\nHR zones:    Z1=8% Z2=52% Z3=32% Z4=7% Z5=1%\nCadence:     <70=12% 70-85=45% 85-100=38% 100+=4%\n\nPower zone timeline:\nZ2 0:00-1:12 | Z1 1:12-3:45 | Z2 3:45-92:30\n\nHR zone timeline:\nZ2 0:00-8:30 | Z3 8:30-72:00 | Z2 72:00-92:30\n",
+  "ride_notes": "RPE 7/10, strong on the climb section",
+  "general_notes": null
+}

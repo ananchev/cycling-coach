@@ -1,0 +1,8 @@
+{
+  "period": {
+    "from": "2025-04-01",
+    "to": "2025-11-02"
+  },
+  "markdown": "# Training Block: Apr 01 – Nov 02\n\n## Athlete Profile Summary\nFTP 251W | HR Max 184 bpm | Weight 72.8 kg\n\n## Older rides (summarized — character cap applied)\n\nPeriod: Apr 01 – Oct 20 | Workouts: 87 | Avg TSS/week: 312 | Avg IF: 0.72\nHighlights: FTP test in May (+8W), recovery week mid-July, ramp test Sep (+5W)\n\n## Recent workouts (full detail)\n\nDate       | Type            | Dur(min) | AvgP(W) | NP(W) | IF    |  VI  | AvgHR | AvgCad | Drift% | TSS\n2025-11-04 | Cycling         |     92.5 |     187 |   203 |  0.81 | 1.09 |   142 |     84 |    3.2 | 112\n2025-11-02 | Cycling         |    181.2 |     162 |   171 |  0.68 | 1.06 |   131 |     82 |    1.8 | 168\n\n## Notes (recent)\n- 2025-11-04 (ride): RPE 7/10, strong on the climb\n",
+  "truncated_chars": true
+}

@@ -1,0 +1,11 @@
+{
+  "items": [],
+  "deltas": {
+    "weight_kg": null,
+    "body_fat_pct": null,
+    "muscle_mass_kg": null,
+    "body_water_pct": null,
+    "bmr_kcal": null
+  },
+  "truncated": false
+}

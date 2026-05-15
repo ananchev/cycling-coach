@@ -1,0 +1,42 @@
+{
+  "selected_range": { "from": "2025-10-06", "to": "2025-11-02", "days": 28 },
+  "prior_range":    { "from": "2025-09-08", "to": "2025-10-05", "days": 28 },
+  "aerobic_only_ef": true,
+  "kpis": {
+    "aerobic_efficiency": {
+      "current": 1.31, "prior": 1.26,
+      "delta": 0.05, "delta_pct": 0.0397, "trend": "up"
+    },
+    "endurance_durability": {
+      "current": 3.2, "prior": 4.1,
+      "delta": -0.9, "delta_pct": -0.2195, "trend": "down"
+    },
+    "cumulative_tss": {
+      "current": 843.2, "prior": 721.5,
+      "delta": 121.7, "delta_pct": 0.1686, "trend": "up"
+    },
+    "cumulative_trimp": {
+      "current": 774.1, "prior": 663.2,
+      "delta": 110.9, "delta_pct": 0.1672, "trend": "up"
+    },
+    "average_if": {
+      "current": 0.74, "prior": 0.71,
+      "delta": 0.03, "delta_pct": 0.0423, "trend": "up"
+    },
+    "completion_rate": {
+      "current": 78.6, "prior": 71.4,
+      "delta": 7.2, "delta_pct": 0.1008, "trend": "up"
+    },
+    "average_weight_kg": {
+      "current": 72.8, "prior": 73.4,
+      "delta": -0.6, "delta_pct": -0.0082, "trend": "down"
+    }
+  },
+  "weekly_load": [
+    { "week_start": "2025-10-06", "tss": 312.1, "trimp": 287.4 },
+    { "week_start": "2025-10-13", "tss": 198.7, "trimp": 184.2 },
+    { "week_start": "2025-10-20", "tss": 221.3, "trimp": 201.8 },
+    { "week_start": "2025-10-27", "tss": 111.1, "trimp": 103.4 }
+  ],
+  "saved_narrative": "Overall trajectory is positive. EF improving to 1.31, weight trending down slightly. The dip in endurance durability (HR drift) warrants watching — consider longer Z2 efforts in the next block."
+}

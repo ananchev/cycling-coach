@@ -1,0 +1,42 @@
+{
+  "items": [
+    {
+      "timestamp": "2025-11-04T09:14:22Z",
+      "type": "ride",
+      "rpe": 7,
+      "text": "Strong effort on the climb, legs felt good",
+      "weight_kg": null,
+      "body_fat_pct": null,
+      "muscle_mass_kg": null,
+      "body_water_pct": null,
+      "bmr_kcal": null,
+      "workout_id": 42
+    },
+    {
+      "timestamp": "2025-11-02T07:30:00Z",
+      "type": "weight",
+      "rpe": null,
+      "text": null,
+      "weight_kg": 72.8,
+      "body_fat_pct": 13.2,
+      "muscle_mass_kg": 59.3,
+      "body_water_pct": 58.1,
+      "bmr_kcal": 1842.0,
+      "workout_id": null
+    },
+    {
+      "timestamp": "2025-11-01T20:15:00Z",
+      "type": "note",
+      "rpe": null,
+      "text": "Slept 8h, feeling recovered",
+      "weight_kg": null,
+      "body_fat_pct": null,
+      "muscle_mass_kg": null,
+      "body_water_pct": null,
+      "bmr_kcal": null,
+      "workout_id": null
+    }
+  ],
+  "truncated": false,
+  "hint": null
+}

@@ -1,0 +1,48 @@
+{
+  "items": [
+    {
+      "id": 42,
+      "wahoo_id": "12345678",
+      "date": "2025-11-04",
+      "type": "Cycling",
+      "duration_min": 92.5,
+      "avg_power_w": 187.3,
+      "np_w": 203.1,
+      "if": 0.81,
+      "vi": 1.085,
+      "avg_hr": 142.0,
+      "tss": 112.4,
+      "processed": true
+    },
+    {
+      "id": 41,
+      "wahoo_id": "12345677",
+      "date": "2025-11-02",
+      "type": "Cycling",
+      "duration_min": 181.2,
+      "avg_power_w": 162.1,
+      "np_w": 171.4,
+      "if": 0.68,
+      "vi": 1.057,
+      "avg_hr": 131.0,
+      "tss": 167.8,
+      "processed": true
+    },
+    {
+      "id": 40,
+      "wahoo_id": "12345670",
+      "date": "2025-10-28",
+      "type": "Cycling",
+      "duration_min": 45.0,
+      "avg_power_w": null,
+      "np_w": null,
+      "if": null,
+      "vi": null,
+      "avg_hr": null,
+      "tss": null,
+      "processed": false
+    }
+  ],
+  "truncated": false,
+  "hint": null
+}

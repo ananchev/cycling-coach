@@ -1,0 +1,19 @@
+{
+  "items": [
+    {
+      "timestamp": "2025-11-04T09:14:22Z",
+      "type": "ride",
+      "rpe": 6,
+      "text": "Steady endurance session",
+      "weight_kg": null,
+      "body_fat_pct": null,
+      "muscle_mass_kg": null,
+      "body_water_pct": null,
+      "bmr_kcal": null,
+      "workout_id": 42
+    }
+  ],
+  "_note": "In integration tests seed MCP_MAX_ROWS+1 notes so truncation fires with real data. Items array is abbreviated here.",
+  "truncated": true,
+  "hint": "Narrow the date range to see fewer results."
+}
