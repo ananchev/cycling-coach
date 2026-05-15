@@ -65,5 +65,8 @@ func NewRouter(cfg *config.Config, db *sql.DB, auth *wahoo.AuthHandler, syncer *
 	// Live log stream — Server-Sent Events endpoint for the admin log panel.
 	r.Get("/api/logs/stream", logStreamHandler(logs))
 
+	// MCP read-only API — authenticated via mTLS at the edge (see MCP_SERVER_SPEC.md).
+	mountMCPRoutes(r, db, cfg.AthleteProfilePath)
+
 	return r
 }
