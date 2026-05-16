@@ -252,6 +252,79 @@ func GetWorkoutWithMetricsByID(db *sql.DB, id int64) (*WorkoutWithMetrics, error
 	return &wm, nil
 }
 
+// WorkoutFilter holds optional filters for ListWorkoutsForMCP.
+type WorkoutFilter struct {
+	From    time.Time
+	To      time.Time
+	Type    string // optional — matched against workout_type or resolved description
+	WahooID string // optional — exact wahoo_id match
+}
+
+// ListWorkoutsForMCP returns workouts with joined metrics, supporting optional
+// date-range, type, and wahoo_id filters. Results are ordered by started_at DESC.
+func ListWorkoutsForMCP(db *sql.DB, f WorkoutFilter, limit int) ([]WorkoutWithMetrics, error) {
+	query := `
+		SELECT w.id, w.wahoo_id, w.started_at, w.duration_sec,
+		       COALESCE(wt.description, w.workout_type),
+		       w.source, w.processed, w.fit_file_path, w.avg_cadence,
+		       m.avg_power, m.avg_hr, m.normalized_power, m.tss, m.hr_drift_pct, m.intensity_factor,
+		       m.pwr_z1_pct, m.pwr_z2_pct, m.pwr_z3_pct, m.pwr_z4_pct, m.pwr_z5_pct,
+		       m.hr_z1_pct, m.hr_z2_pct, m.hr_z3_pct, m.hr_z4_pct, m.hr_z5_pct,
+		       m.cad_lt70_pct, m.cad_70_85_pct, m.cad_85_100_pct, m.cad_ge100_pct,
+		       m.zone_timeline, m.hr_zone_timeline, m.variability_index,
+		       GROUP_CONCAT(CASE WHEN n.type='ride' THEN n.note END, ' | '),
+		       GROUP_CONCAT(CASE WHEN n.type='note' THEN n.note END, ' | ')
+		FROM workouts w
+		LEFT JOIN ride_metrics m ON m.workout_id = w.id
+		LEFT JOIN workout_types wt ON wt.id = w.workout_type_id
+		LEFT JOIN athlete_notes n ON n.workout_id = w.id AND n.note IS NOT NULL AND n.note != ''
+		WHERE 1=1`
+	args := []any{}
+	if !f.From.IsZero() {
+		query += " AND w.started_at >= ?"
+		args = append(args, f.From)
+	}
+	if !f.To.IsZero() {
+		query += " AND w.started_at <= ?"
+		args = append(args, f.To)
+	}
+	if f.WahooID != "" {
+		query += " AND w.wahoo_id = ?"
+		args = append(args, f.WahooID)
+	}
+	if f.Type != "" {
+		query += " AND (w.workout_type = ? OR wt.description = ?)"
+		args = append(args, f.Type, f.Type)
+	}
+	query += " GROUP BY w.id ORDER BY w.started_at DESC LIMIT ?"
+	args = append(args, limit)
+
+	rows, err := db.Query(query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("storage.ListWorkoutsForMCP: %w", err)
+	}
+	defer rows.Close()
+
+	var out []WorkoutWithMetrics
+	for rows.Next() {
+		var wm WorkoutWithMetrics
+		if err := rows.Scan(
+			&wm.ID, &wm.WahooID, &wm.StartedAt, &wm.DurationSec, &wm.WorkoutType,
+			&wm.Source, &wm.Processed, &wm.FITFilePath, &wm.AvgCadence,
+			&wm.AvgPower, &wm.AvgHR, &wm.NormalizedPower, &wm.TSS, &wm.HRDriftPct, &wm.IntensityFactor,
+			&wm.PwrZ1Pct, &wm.PwrZ2Pct, &wm.PwrZ3Pct, &wm.PwrZ4Pct, &wm.PwrZ5Pct,
+			&wm.HRZ1Pct, &wm.HRZ2Pct, &wm.HRZ3Pct, &wm.HRZ4Pct, &wm.HRZ5Pct,
+			&wm.CadLT70Pct, &wm.Cad70To85Pct, &wm.Cad85To100Pct, &wm.CadGE100Pct,
+			&wm.ZoneTimeline, &wm.HRZoneTimeline, &wm.VariabilityIndex,
+			&wm.RideNotes, &wm.GeneralNotes,
+		); err != nil {
+			return nil, fmt.Errorf("storage.ListWorkoutsForMCP: scan: %w", err)
+		}
+		out = append(out, wm)
+	}
+	return out, rows.Err()
+}
+
 // scanner abstracts *sql.Row and *sql.Rows so a single scan function handles both.
 type scanner interface {
 	Scan(dest ...any) error

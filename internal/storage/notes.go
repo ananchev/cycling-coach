@@ -177,6 +177,61 @@ func ListBodyMetrics(db *sql.DB, from, to time.Time, limit int) ([]AthleteNote, 
 	return out, nil
 }
 
+// NoteFilter holds optional filters for ListNotesFiltered.
+type NoteFilter struct {
+	From time.Time
+	To   time.Time
+	Type string // optional NoteType filter
+}
+
+// ListNotesFiltered returns notes matching the filter, ordered by timestamp ASC.
+func ListNotesFiltered(db *sql.DB, f NoteFilter, limit int) ([]AthleteNote, error) {
+	query := `
+		SELECT id, timestamp, type, rpe, weight_kg, body_fat_pct, muscle_mass_kg, body_water_pct, bmr_kcal, note, workout_id, created_at
+		FROM athlete_notes
+		WHERE 1=1`
+	args := []any{}
+	if !f.From.IsZero() {
+		query += " AND timestamp >= ?"
+		args = append(args, f.From)
+	}
+	if !f.To.IsZero() {
+		query += " AND timestamp <= ?"
+		args = append(args, f.To)
+	}
+	if f.Type != "" {
+		query += " AND type = ?"
+		args = append(args, f.Type)
+	}
+	query += " ORDER BY timestamp ASC LIMIT ?"
+	args = append(args, limit)
+
+	rows, err := db.Query(query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("storage.ListNotesFiltered: %w", err)
+	}
+	defer rows.Close()
+
+	var out []AthleteNote
+	for rows.Next() {
+		var note AthleteNote
+		var noteType string
+		if err := rows.Scan(
+			&note.ID, &note.Timestamp, &noteType,
+			&note.RPE, &note.WeightKG, &note.BodyFatPct, &note.MuscleMassKG, &note.BodyWaterPct, &note.BMRKcal,
+			&note.Note, &note.WorkoutID, &note.CreatedAt,
+		); err != nil {
+			return nil, fmt.Errorf("storage.ListNotesFiltered: scan: %w", err)
+		}
+		note.Type = NoteType(noteType)
+		out = append(out, note)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("storage.ListNotesFiltered: rows: %w", err)
+	}
+	return out, nil
+}
+
 // ListNotesByWorkout returns notes linked to a specific workout, ordered by timestamp ASC.
 // If noteType is non-empty, only notes of that type are returned.
 func ListNotesByWorkout(db *sql.DB, workoutID int64, noteType string) ([]AthleteNote, error) {

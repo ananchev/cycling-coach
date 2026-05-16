@@ -131,6 +131,7 @@ type ReportWithDelivery struct {
 	DeliveryError   *string
 	HasSystemPrompt bool
 	HasUserPrompt   bool
+	HasNarrative    bool
 }
 
 // ListReportsWithDelivery returns all reports (both types) joined with their
@@ -143,6 +144,7 @@ func ListReportsWithDelivery(db *sql.DB, from, to time.Time, limit int) ([]Repor
 		SELECT r.id, r.type, r.week_start, r.week_end, r.summary_text, r.full_html, r.created_at,
 		       CASE WHEN r.system_prompt <> '' THEN 1 ELSE 0 END,
 		       CASE WHEN r.user_prompt <> '' THEN 1 ELSE 0 END,
+		       CASE WHEN r.narrative_text IS NOT NULL AND r.narrative_text != '' THEN 1 ELSE 0 END,
 		       d.status, d.sent_at, d.error
 		FROM reports r
 		LEFT JOIN report_deliveries d ON d.report_id = r.id AND d.channel = 'telegram'`
@@ -188,7 +190,7 @@ func ListReportsWithDelivery(db *sql.DB, from, to time.Time, limit int) ([]Repor
 		err := rows.Scan(
 			&rwd.ID, &repType, &rwd.WeekStart, &rwd.WeekEnd,
 			&rwd.SummaryText, &rwd.FullHTML, &rwd.CreatedAt,
-			&rwd.HasSystemPrompt, &rwd.HasUserPrompt,
+			&rwd.HasSystemPrompt, &rwd.HasUserPrompt, &rwd.HasNarrative,
 			&rwd.DeliveryStatus, &rwd.SentAt, &rwd.DeliveryError,
 		)
 		if err != nil {

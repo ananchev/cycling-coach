@@ -206,7 +206,7 @@ func TestMCPEndpoints_Return200WithContractShape(t *testing.T) {
 	})
 
 	t.Run("report-detail", func(t *testing.T) {
-		rr := mcpGETWithID(h.getReport, "/api/mcp/v1/reports/1", "id", "1")
+		rr := mcpGETWithID(h.getReport, "/api/mcp/v1/reports/11", "id", "11")
 		assertMCPOK(t, rr)
 		var resp mcpReportDetailResponse
 		mustDecode(t, rr, &resp)
@@ -289,7 +289,7 @@ func TestMCPRoutes_AllMounted(t *testing.T) {
 		"/api/mcp/v1/notes",
 		"/api/mcp/v1/body-metrics",
 		"/api/mcp/v1/reports",
-		"/api/mcp/v1/reports/1",
+		"/api/mcp/v1/reports/11",
 	}
 	for _, path := range paths {
 		t.Run(path, func(t *testing.T) {
