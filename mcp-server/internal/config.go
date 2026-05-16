@@ -26,7 +26,7 @@ type Config struct {
 func LoadConfig() (*Config, error) {
 	c := &Config{
 		HTTPAddr:             getEnv("MCP_HTTP_ADDR", ":8091"),
-		PublicURL:            getEnv("MCP_PUBLIC_URL", ""),
+		PublicURL:            getEnv("MCP_PUBLIC_URL", "http://localhost:8091"),
 		AppBaseURL:           getEnv("MCP_APP_BASE_URL", ""),
 		AppClientCert:        getEnv("MCP_APP_CLIENT_CERT", ""),
 		AppClientKey:         getEnv("MCP_APP_CLIENT_KEY", ""),
