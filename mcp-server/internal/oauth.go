@@ -324,6 +324,36 @@ func (o *OAuthServer) verifyJWT(token string) error {
 	return nil
 }
 
+// ── Helpers for external callers (smoke test) ────────────────────────────────
+
+// IssueROPC validates username+password and returns a signed JWT.
+// Used by the smoke test binary to obtain a token without an HTTP round-trip.
+func (o *OAuthServer) IssueROPC(username, password string) (string, error) {
+	if username != o.username || password != o.password {
+		return "", fmt.Errorf("invalid credentials")
+	}
+	return o.issueJWT("athlete")
+}
+
+// BuildExpiredJWT returns a structurally valid JWT signed with o's key but with
+// an exp claim set one hour in the past. Used by the smoke test to verify that
+// RequireBearer correctly rejects expired tokens.
+func BuildExpiredJWT(o *OAuthServer) string {
+	hdr := base64.RawURLEncoding.EncodeToString([]byte(`{"alg":"HS256","typ":"JWT"}`))
+	payload, _ := json.Marshal(map[string]any{
+		"sub": "athlete",
+		"iss": o.publicURL,
+		"iat": time.Now().Add(-2 * time.Hour).Unix(),
+		"exp": time.Now().Add(-time.Hour).Unix(),
+	})
+	claims := base64.RawURLEncoding.EncodeToString(payload)
+	unsigned := hdr + "." + claims
+	mac := hmac.New(sha256.New, o.signingKey)
+	mac.Write([]byte(unsigned))
+	sig := base64.RawURLEncoding.EncodeToString(mac.Sum(nil))
+	return unsigned + "." + sig
+}
+
 // ── Package-level helpers ────────────────────────────────────────────────────
 
 // verifyS256 checks that SHA256(verifier) == base64url_decode(challenge).
