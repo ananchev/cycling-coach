@@ -277,7 +277,7 @@ func TestMCPEndpoints_BadParams_Return400(t *testing.T) {
 func TestMCPRoutes_AllMounted(t *testing.T) {
 	store := openMCPTestDB(t)
 	r := chi.NewRouter()
-	mountMCPRoutes(r, store.DB(), mcpTestProfilePath)
+	mountMCPRoutes(r, store.DB(), mcpTestProfilePath, "")
 
 	paths := []string{
 		"/api/mcp/v1/profile",

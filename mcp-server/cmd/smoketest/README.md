@@ -12,7 +12,7 @@ with HTTP status and timing.
 
 ### Section 1 — App connectivity
 
-Creates an `AppClient` (with mTLS if cert/key are configured) and calls every
+Creates an `AppClient` (with mTLS and API key if configured) and calls every
 `/api/mcp/v1/*` endpoint on the real cycling-coach app. For list endpoints it
 automatically chains into a detail call using the first returned ID, so the
 full read path is exercised end-to-end.
@@ -24,11 +24,11 @@ full read path is exercised end-to-end.
 | `GET /api/mcp/v1/block-context?block=current` | Composed coaching context |
 | `GET /api/mcp/v1/progress` | KPI snapshot |
 | `GET /api/mcp/v1/workouts?limit=5` | Workout list |
-| `GET /api/mcp/v1/workouts/{id}` | First workout from list |
+| `GET /api/mcp/v1/workouts/{id}` | First workout from list; skips with `list call failed` if the list check itself failed |
 | `GET /api/mcp/v1/notes?limit=5` | Notes list |
 | `GET /api/mcp/v1/body-metrics?limit=5` | Body metrics |
 | `GET /api/mcp/v1/reports?limit=5` | Report list |
-| `GET /api/mcp/v1/reports/{id}` | First report from list |
+| `GET /api/mcp/v1/reports/{id}` | First report from list; skips with `list call failed` if the list check itself failed |
 
 ### Section 2 — OAuth in-process
 
@@ -37,7 +37,7 @@ validates the token lifecycle without any HTTP overhead.
 
 | Check | Notes |
 |-------|-------|
-| ROPC token issuance | `issueJWT` with correct credentials |
+| ROPC token issuance | Issues a JWT with the configured credentials |
 | Valid token passes `RequireBearer` | Inner handler reached |
 | Missing token rejected | `401` returned |
 | Expired token rejected | `401` returned |
@@ -48,8 +48,8 @@ Skipped when `MCP_OAUTH_SIGNING_KEY` is not set (local dev mode).
 
 Calls the **running** MCP server process over HTTP. Enabled by setting
 `MCP_SERVER_URL`. The ROPC token is issued in-process (same signing key) and
-replayed against the live server, so this validates that auth middleware and
-routing are wired correctly.
+replayed against the live server, validating that auth middleware and routing
+are wired correctly.
 
 | Check | Notes |
 |-------|-------|
@@ -57,6 +57,21 @@ routing are wired correctly.
 | ROPC token from running server | `POST /oauth/token` returns JWT |
 | No token → 401 | `POST /mcp` without Bearer is rejected |
 | Valid token → not 401 | `POST /mcp` with Bearer reaches the MCP handler |
+
+---
+
+## Security model
+
+The `/api/mcp/v1/*` endpoints are protected by two independent layers:
+
+| Layer | Mechanism | Where enforced |
+|-------|-----------|----------------|
+| 1 — Cloudflare mTLS | Client certificate on every TLS handshake | Edge (Cloudflare) |
+| 2 — Static Bearer token | `Authorization: Bearer <key>` on every request | App middleware |
+
+The smoke test validates both. A `403` on Section 1 with a tampered cert
+confirms Layer 1 is active. A `401` when `MCP_APP_API_KEY` is wrong (or
+absent while `MCP_API_KEY` is set on the app) confirms Layer 2 is active.
 
 ---
 
@@ -71,7 +86,7 @@ MCP server itself.
 |----------|---------|-------------|
 | `MCP_APP_BASE_URL` | `https://cycling-coach.example.com` | Base URL of the cycling-coach app |
 
-### mTLS (production; omit for local dev)
+### mTLS — Layer 1 (production; omit for local dev)
 
 | Variable | Example | Description |
 |----------|---------|-------------|
@@ -81,7 +96,17 @@ MCP server itself.
 Place the certificate files in `mcp-server/testdata/` — that directory is
 `.gitignore`d for `*.crt`, `*.key`, and `*.pem` so they will not be committed.
 
-### OAuth
+### App API key — Layer 2 (production; omit for local dev)
+
+| Variable | Example | Description |
+|----------|---------|-------------|
+| `MCP_APP_API_KEY` | `$(openssl rand -hex 32)` | Bearer token sent to the app on every request. Must match `MCP_API_KEY` set on the cycling-coach app. |
+
+Both env vars must hold the same value. When `MCP_APP_API_KEY` is set here but
+`MCP_API_KEY` is not set on the app (or vice-versa), Section 1 will return
+`401` on every endpoint.
+
+### OAuth (MCP server auth)
 
 | Variable | Example | Description |
 |----------|---------|-------------|
@@ -100,20 +125,22 @@ Place the certificate files in `mcp-server/testdata/` — that directory is
 ## Usage
 
 ```sh
-# ── Local dev (no mTLS, no OAuth) ────────────────────────────────────────────
+# ── Local dev (no mTLS, no API key, no OAuth) ─────────────────────────────────
 MCP_APP_BASE_URL=http://localhost:8080 \
   go run ./cmd/smoketest/
 
-# ── Against the real app with mTLS only ──────────────────────────────────────
+# ── Production: mTLS + API key only ──────────────────────────────────────────
 MCP_APP_BASE_URL=https://cycling-coach.example.com \
 MCP_APP_CLIENT_CERT=testdata/client.crt \
 MCP_APP_CLIENT_KEY=testdata/client.key \
+MCP_APP_API_KEY=your-api-key \
   go run ./cmd/smoketest/
 
-# ── Full trust chain: mTLS + OAuth + running MCP server ──────────────────────
+# ── Full trust chain: mTLS + API key + OAuth + running MCP server ─────────────
 MCP_APP_BASE_URL=https://cycling-coach.example.com \
 MCP_APP_CLIENT_CERT=testdata/client.crt \
 MCP_APP_CLIENT_KEY=testdata/client.key \
+MCP_APP_API_KEY=your-api-key \
 MCP_OAUTH_USER=athlete \
 MCP_OAUTH_PASSWORD=your-password \
 MCP_OAUTH_SIGNING_KEY=your-signing-key \
@@ -125,8 +152,10 @@ Or build the binary first:
 
 ```sh
 go build -o /tmp/smoketest ./cmd/smoketest/
-MCP_APP_BASE_URL=… /tmp/smoketest
+MCP_APP_BASE_URL=… MCP_APP_API_KEY=… /tmp/smoketest
 ```
+
+---
 
 ## Exit codes
 
@@ -134,6 +163,8 @@ MCP_APP_BASE_URL=… /tmp/smoketest
 |------|---------|
 | `0` | All executed checks passed |
 | `1` | One or more checks failed, or a configuration error occurred |
+
+---
 
 ## Example output
 
@@ -146,7 +177,7 @@ MCP_APP_BASE_URL=… /tmp/smoketest
 
   ✓  GET /api/mcp/v1/profile                           200  142ms  {"markdown":"# Athlete Pr…
   ✓  GET /api/mcp/v1/zone-config                       200   88ms  {"ftp_w":270,"hr_max_bpm…
-  ✓  GET /api/mcp/v1/block-context?block=current       200  310ms  {"markdown":"## Training …
+  ✓  GET /api/mcp/v1/block-context?block=current       200  310ms  {"period":{"from":"2026-0…
   ✓  GET /api/mcp/v1/progress                          200  115ms  {"selected_range":{"from"…
   ✓  GET /api/mcp/v1/workouts?limit=5                  200   67ms  5 items
   ✓  GET /api/mcp/v1/workouts/42                       200   91ms  {"id":42,"wahoo_id":"…
@@ -173,6 +204,22 @@ MCP_APP_BASE_URL=… /tmp/smoketest
   18/18 checks passed
 ────────────────────────────────────────────────────────────
 ```
+
+**What a bad cert looks like** (Layer 1 active):
+```
+  ✗  GET /api/mcp/v1/profile          403   50ms  <!DOCTYPE html>…
+  ✗  GET /api/mcp/v1/zone-config      403   13ms  <!DOCTYPE html>…
+  -  GET /api/mcp/v1/workouts/{id}         skipped: list call failed
+```
+
+**What a missing API key looks like** (Layer 2 active):
+```
+  ✗  GET /api/mcp/v1/profile          401   12ms  {"error":"invalid or missing API key"}
+  ✗  GET /api/mcp/v1/zone-config      401    9ms  {"error":"invalid or missing API key"}
+  -  GET /api/mcp/v1/workouts/{id}         skipped: list call failed
+```
+
+---
 
 ## Placing the client certificate
 

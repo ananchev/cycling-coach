@@ -92,10 +92,13 @@ func (s *smokeTest) runAppSection() {
 
 	// Workout list → detail
 	wBody := s.appGet(appClient, "/api/mcp/v1/workouts?limit=5")
-	if wID := firstID(wBody, "items"); wID != "" {
-		s.appGet(appClient, "/api/mcp/v1/workouts/"+wID)
-	} else {
-		s.skipCheck("GET /api/mcp/v1/workouts/{id}", "no workouts returned")
+	switch {
+	case wBody == nil:
+		s.skipCheck("GET /api/mcp/v1/workouts/{id}", "list call failed")
+	case firstID(wBody, "items") != "":
+		s.appGet(appClient, "/api/mcp/v1/workouts/"+firstID(wBody, "items"))
+	default:
+		s.skipCheck("GET /api/mcp/v1/workouts/{id}", "no workouts in database")
 	}
 
 	// Notes and body metrics
@@ -104,10 +107,13 @@ func (s *smokeTest) runAppSection() {
 
 	// Report list → detail
 	rBody := s.appGet(appClient, "/api/mcp/v1/reports?limit=5")
-	if rID := firstID(rBody, "items"); rID != "" {
-		s.appGet(appClient, "/api/mcp/v1/reports/"+rID)
-	} else {
-		s.skipCheck("GET /api/mcp/v1/reports/{id}", "no reports returned")
+	switch {
+	case rBody == nil:
+		s.skipCheck("GET /api/mcp/v1/reports/{id}", "list call failed")
+	case firstID(rBody, "items") != "":
+		s.appGet(appClient, "/api/mcp/v1/reports/"+firstID(rBody, "items"))
+	default:
+		s.skipCheck("GET /api/mcp/v1/reports/{id}", "no reports in database")
 	}
 }
 

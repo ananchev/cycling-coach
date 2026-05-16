@@ -25,6 +25,7 @@ const appClientTimeout = 30 * time.Second
 type AppClient struct {
 	baseURL    string
 	httpClient *http.Client
+	apiKey     string // sent as "Authorization: Bearer <apiKey>" when non-empty
 }
 
 // NewAppClient builds an AppClient from the provided Config.
@@ -57,6 +58,7 @@ func NewAppClient(cfg *Config) (*AppClient, error) {
 	return &AppClient{
 		baseURL:    strings.TrimRight(cfg.AppBaseURL, "/"),
 		httpClient: hc,
+		apiKey:     cfg.AppAPIKey,
 	}, nil
 }
 
@@ -86,6 +88,9 @@ func (c *AppClient) Get(ctx context.Context, path string) ([]byte, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+path, nil)
 	if err != nil {
 		return nil, fmt.Errorf("appclient: build request: %w", err)
+	}
+	if c.apiKey != "" {
+		req.Header.Set("Authorization", "Bearer "+c.apiKey)
 	}
 	resp, err := c.httpClient.Do(req)
 	if err != nil {

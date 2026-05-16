@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -232,9 +233,12 @@ type mcpHandlers struct {
 }
 
 // mountMCPRoutes registers all /api/mcp/v1/* routes on r.
-func mountMCPRoutes(r chi.Router, db *sql.DB, profilePath string) {
+// When apiKey is non-empty, requests must carry "Authorization: Bearer <apiKey>".
+// Empty apiKey disables the check (local development).
+func mountMCPRoutes(r chi.Router, db *sql.DB, profilePath, apiKey string) {
 	h := &mcpHandlers{db: db, profilePath: profilePath}
 	r.Route("/api/mcp/v1", func(r chi.Router) {
+		r.Use(mcpBearerAuth(apiKey))
 		r.Get("/profile", h.profile)
 		r.Get("/zone-config", h.zoneConfig)
 		r.Get("/workouts", h.listWorkouts)
@@ -246,6 +250,26 @@ func mountMCPRoutes(r chi.Router, db *sql.DB, profilePath string) {
 		r.Get("/reports", h.listReports)
 		r.Get("/reports/{id}", h.getReport)
 	})
+}
+
+// mcpBearerAuth returns a middleware that enforces a static Bearer token on
+// every request. When key is empty the middleware is a no-op (local dev).
+func mcpBearerAuth(key string) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if key == "" {
+				next.ServeHTTP(w, r)
+				return
+			}
+			auth := r.Header.Get("Authorization")
+			token, ok := strings.CutPrefix(auth, "Bearer ")
+			if !ok || token != key {
+				writeMCPError(w, http.StatusUnauthorized, "invalid or missing API key")
+				return
+			}
+			next.ServeHTTP(w, r)
+		})
+	}
 }
 
 // ── Handlers ──────────────────────────────────────────────────────────────────

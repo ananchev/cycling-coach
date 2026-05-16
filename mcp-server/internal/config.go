@@ -13,6 +13,7 @@ type Config struct {
 	AppBaseURL           string
 	AppClientCert        string
 	AppClientKey         string
+	AppAPIKey            string
 	OAuthUser            string
 	OAuthPassword        string
 	OAuthSigningKey      string
@@ -30,6 +31,7 @@ func LoadConfig() (*Config, error) {
 		AppBaseURL:           getEnv("MCP_APP_BASE_URL", ""),
 		AppClientCert:        getEnv("MCP_APP_CLIENT_CERT", ""),
 		AppClientKey:         getEnv("MCP_APP_CLIENT_KEY", ""),
+		AppAPIKey:            getEnv("MCP_APP_API_KEY", ""),
 		OAuthUser:            getEnv("MCP_OAUTH_USER", ""),
 		OAuthPassword:        getEnv("MCP_OAUTH_PASSWORD", ""),
 		OAuthSigningKey:      getEnv("MCP_OAUTH_SIGNING_KEY", ""),

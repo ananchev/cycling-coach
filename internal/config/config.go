@@ -28,6 +28,11 @@ type Config struct {
 	FITFilesPath       string
 	AthleteProfilePath string
 
+	// MCP read-only API
+	// When non-empty, all /api/mcp/v1/* requests must carry
+	// "Authorization: Bearer <MCPAPIKey>" (defence-in-depth behind Cloudflare mTLS).
+	MCPAPIKey string
+
 	// Scheduler cron expressions (empty = disabled)
 	CronSync          string // Wahoo sync, e.g. "0 */4 * * *"
 	CronFITProcessing string // FIT file processing, e.g. "*/15 * * * *"
@@ -55,6 +60,8 @@ func Load() (*Config, error) {
 		DatabasePath:       envOrDefault("DATABASE_PATH", "/data/cycling.db"),
 		FITFilesPath:       envOrDefault("FIT_FILES_PATH", "/data/fit_files/"),
 		AthleteProfilePath: envOrDefault("ATHLETE_PROFILE_PATH", "/data/athlete-profile.md"),
+
+		MCPAPIKey: os.Getenv("MCP_API_KEY"),
 
 		CronSync:          os.Getenv("CRON_SYNC"),
 		CronFITProcessing: os.Getenv("CRON_FIT_PROCESSING"),
